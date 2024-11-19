@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import jdk.internal.util.OperatingSystem;
 import jdk.jpackage.internal.resources.ResourceLocator;
@@ -53,7 +54,7 @@ public class OverridableResourceTest {
 
     @Test
     public void testDefault() throws IOException {
-        byte[] actualBytes = saveToFile(new OverridableResource(DEFAULT_NAME));
+        byte[] actualBytes = saveToFile(new OverridableResource(DEFAULT_NAME, ResourceLocator.class));
 
         try (InputStream is = ResourceLocator.class.getResourceAsStream(
                 DEFAULT_NAME)) {
@@ -63,7 +64,7 @@ public class OverridableResourceTest {
 
     @Test
     public void testDefaultWithSubstitution() throws IOException {
-        OverridableResource resource = new OverridableResource(DEFAULT_NAME);
+        OverridableResource resource = new OverridableResource(DEFAULT_NAME, ResourceLocator.class);
 
         List<String> linesBeforeSubstitution = convertToStringList(saveToFile(
                 resource));
@@ -119,7 +120,7 @@ public class OverridableResourceTest {
         Path customFile = createCustomFile("foo", expectedResourceData);
 
         List<String> actualResourceData = convertToStringList(saveToFile(
-                new OverridableResource(defaultName)
+                createOverridableResource(defaultName)
                         .setPublicName(customFile.getFileName())
                         .setResourceDir(customFile.getParent())));
 
@@ -150,7 +151,7 @@ public class OverridableResourceTest {
                 "Bar", "Bar", "Goodbye", "JJ");
 
         final List<String> actualResourceData = convertToStringList(saveToFile(
-                new OverridableResource(defaultName)
+                createOverridableResource(defaultName)
                         .setPublicName(customFile.getFileName())
                         .setSubstitutionData(substitutionData)
                         .setResourceDir(customFile.getParent())));
@@ -159,7 +160,7 @@ public class OverridableResourceTest {
 
         // Don't call setPublicName()
         final Path dstFile = tempFolder.newFolder().toPath().resolve(customFile.getFileName());
-        new OverridableResource(defaultName)
+        createOverridableResource(defaultName)
                 .setSubstitutionData(substitutionData)
                 .setResourceDir(customFile.getParent())
                 .saveToFile(dstFile);
@@ -169,7 +170,7 @@ public class OverridableResourceTest {
 
         // Verify setSubstitutionData() stores a copy of passed in data
         Map<String, String> substitutionData2 = new HashMap(substitutionData);
-        var resource = new OverridableResource(defaultName)
+        var resource = createOverridableResource(defaultName)
                 .setResourceDir(customFile.getParent());
 
         resource.setSubstitutionData(substitutionData2);
@@ -186,13 +187,13 @@ public class OverridableResourceTest {
         Path dstFolder = tempFolder.newFolder().toPath();
         Path dstFile = dstFolder.resolve(Path.of("foo", "bar"));
 
-        new OverridableResource(null).saveToFile(dstFile);
+        new OverridableResource().saveToFile(dstFile);
 
         assertFalse(dstFile.toFile().exists());
     }
 
-    private final static String DEFAULT_NAME;
-    private final static Map<String, String> SUBSTITUTION_DATA;
+    private static final String DEFAULT_NAME;
+    private static final Map<String, String> SUBSTITUTION_DATA;
     static {
         if (OperatingSystem.isWindows()) {
             DEFAULT_NAME = "WinLauncher.template";
@@ -224,6 +225,12 @@ public class OverridableResourceTest {
         Files.write(customFile, data);
 
         return customFile;
+    }
+
+    private static OverridableResource createOverridableResource(String defaultName) {
+        return Optional.ofNullable(defaultName).map(name -> {
+            return new OverridableResource(defaultName, ResourceLocator.class);
+        }).orElseGet(OverridableResource::new);
     }
 
     private static List<String> convertToStringList(byte[] data) {

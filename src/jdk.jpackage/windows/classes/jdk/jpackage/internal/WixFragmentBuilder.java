@@ -24,6 +24,8 @@
  */
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.WinMsiPackage;
+import jdk.jpackage.internal.model.DottedVersion;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -39,9 +41,7 @@ import java.util.regex.Pattern;
 import javax.xml.stream.XMLStreamWriter;
 import jdk.jpackage.internal.util.XmlConsumer;
 import jdk.jpackage.internal.OverridableResource.Source;
-import static jdk.jpackage.internal.StandardBundlerParam.CONFIG_ROOT;
 import jdk.internal.util.Architecture;
-import static jdk.jpackage.internal.OverridableResource.createResource;
 import jdk.jpackage.internal.WixSourceConverter.ResourceGroup;
 import jdk.jpackage.internal.WixToolset.WixToolsetType;
 import jdk.jpackage.internal.util.XmlUtils;
@@ -62,12 +62,11 @@ abstract class WixFragmentBuilder {
         outputFileName = v;
     }
 
-    void initFromParams(Map<String, ? super Object> params) {
+    void initFromParams(BuildEnv env, WinMsiPackage pkg) {
         wixVariables = null;
         additionalResources = null;
-        configRoot = CONFIG_ROOT.fetchFrom(params);
-        fragmentResource = createResource(outputFileName, params).setSourceOrder(
-                Source.ResourceDir);
+        configRoot = env.configDir();
+        fragmentResource = env.createResource(outputFileName).setSourceOrder(Source.ResourceDir);
     }
 
     List<String> getLoggableWixFeatures() {

@@ -25,6 +25,9 @@
 
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.ConfigException;
+import jdk.jpackage.internal.model.PackagerException;
+import jdk.jpackage.internal.util.PathGroup;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -40,7 +43,7 @@ import java.util.Objects;
 import java.util.ResourceBundle;
 import static jdk.jpackage.internal.MacAppImageBuilder.ICON_ICNS;
 import static jdk.jpackage.internal.MacAppImageBuilder.MAC_CF_BUNDLE_IDENTIFIER;
-import static jdk.jpackage.internal.OverridableResource.createResource;
+import static jdk.jpackage.internal.StandardBundlerParam.createResource;
 
 import static jdk.jpackage.internal.StandardBundlerParam.APP_NAME;
 import static jdk.jpackage.internal.StandardBundlerParam.CONFIG_ROOT;
@@ -66,7 +69,7 @@ public class MacDmgBundler extends MacBaseInstallerBundler {
     static final String DEFAULT_LICENSE_PLIST="lic_template.plist";
 
     public static final BundlerParamInfo<String> INSTALLER_SUFFIX =
-            new StandardBundlerParam<> (
+            new BundlerParamInfo<> (
             "mac.dmg.installerName.suffix",
             String.class,
             params -> "",

@@ -39,15 +39,23 @@ import javax.xml.transform.Source;
 import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.stax.StAXResult;
-import jdk.jpackage.internal.IOUtils;
 
 
 public final class XmlUtils {
 
+    @FunctionalInterface
+    public interface XmlConsumerNoArg {
+        void accept() throws IOException, XMLStreamException;
+    }
+
+    public static XmlConsumer toXmlConsumer(XmlConsumerNoArg xmlConsumer) {
+        return xml -> xmlConsumer.accept();
+    }
+
     public static void createXml(Path dstFile, XmlConsumer xmlConsumer) throws
             IOException {
         XMLOutputFactory xmlFactory = XMLOutputFactory.newInstance();
-        Files.createDirectories(IOUtils.getParent(dstFile));
+        Files.createDirectories(dstFile.getParent());
         try (Writer w = Files.newBufferedWriter(dstFile)) {
             // Wrap with pretty print proxy
             XMLStreamWriter xml = (XMLStreamWriter) Proxy.newProxyInstance(XMLStreamWriter.class.getClassLoader(),

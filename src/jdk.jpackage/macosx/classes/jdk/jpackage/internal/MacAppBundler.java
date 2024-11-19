@@ -25,6 +25,7 @@
 
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.ConfigException;
 import java.text.MessageFormat;
 import java.util.Map;
 import java.util.Optional;
@@ -37,23 +38,15 @@ import static jdk.jpackage.internal.StandardBundlerParam.SIGN_BUNDLE;
 
 public class MacAppBundler extends AppImageBundler {
      public MacAppBundler() {
-        setAppImageSupplier(imageOutDir -> {
-            return new MacAppImageBuilder(imageOutDir, isDependentTask());
+        setAppImageSupplier((params, imageOutDir) -> {
+            var builder = new MacAppImageBuilder(imageOutDir, isDependentTask());
+            builder.prepareApplicationFiles(params);
         });
         setParamsValidator(MacAppBundler::doValidate);
     }
 
-    private static final String TEMPLATE_BUNDLE_ICON = "JavaApp.icns";
-
-    public static final BundlerParamInfo<String> DEFAULT_ICNS_ICON =
-            new StandardBundlerParam<>(
-            ".mac.default.icns",
-            String.class,
-            params -> TEMPLATE_BUNDLE_ICON,
-            (s, p) -> s);
-
     public static final BundlerParamInfo<String> DEVELOPER_ID_APP_SIGNING_KEY =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             "mac.signing-key-developer-id-app",
             String.class,
             params -> {
@@ -85,14 +78,14 @@ public class MacAppBundler extends AppImageBundler {
             (s, p) -> s);
 
     public static final BundlerParamInfo<String> APP_IMAGE_SIGN_IDENTITY =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             Arguments.CLIOptions.MAC_APP_IMAGE_SIGN_IDENTITY.getId(),
             String.class,
             params -> "",
             null);
 
     public static final BundlerParamInfo<String> BUNDLE_ID_SIGNING_PREFIX =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             Arguments.CLIOptions.MAC_BUNDLE_SIGNING_PREFIX.getId(),
             String.class,
             params -> getIdentifier(params) + ".",

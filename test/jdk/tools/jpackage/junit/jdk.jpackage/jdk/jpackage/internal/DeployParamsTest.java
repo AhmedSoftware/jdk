@@ -22,6 +22,7 @@
  */
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.PackagerException;
 import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
 import org.junit.Rule;

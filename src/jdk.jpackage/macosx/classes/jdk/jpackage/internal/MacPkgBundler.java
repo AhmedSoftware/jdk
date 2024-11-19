@@ -25,6 +25,8 @@
 
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.ConfigException;
+import jdk.jpackage.internal.model.PackagerException;
 import jdk.internal.util.Architecture;
 import jdk.internal.util.OSVersion;
 
@@ -60,7 +62,7 @@ import static jdk.jpackage.internal.MacBaseInstallerBundler.INSTALLER_SIGN_IDENT
 import static jdk.jpackage.internal.MacAppBundler.APP_IMAGE_SIGN_IDENTITY;
 import static jdk.jpackage.internal.StandardBundlerParam.APP_STORE;
 import static jdk.jpackage.internal.MacAppImageBuilder.MAC_CF_BUNDLE_IDENTIFIER;
-import static jdk.jpackage.internal.OverridableResource.createResource;
+import static jdk.jpackage.internal.StandardBundlerParam.createResource;
 import static jdk.jpackage.internal.StandardBundlerParam.RESOURCE_DIR;
 import jdk.jpackage.internal.util.FileUtils;
 import jdk.jpackage.internal.util.XmlUtils;
@@ -74,7 +76,7 @@ public class MacPkgBundler extends MacBaseInstallerBundler {
     private static final String DEFAULT_PDF = "product-def.plist";
 
     private static final BundlerParamInfo<Path> PACKAGES_ROOT =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             "mac.pkg.packagesRoot",
             Path.class,
             params -> {
@@ -91,7 +93,7 @@ public class MacPkgBundler extends MacBaseInstallerBundler {
 
 
     protected final BundlerParamInfo<Path> SCRIPTS_DIR =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             "mac.pkg.scriptsDir",
             Path.class,
             params -> {
@@ -108,7 +110,7 @@ public class MacPkgBundler extends MacBaseInstallerBundler {
 
     public static final
             BundlerParamInfo<String> DEVELOPER_ID_INSTALLER_SIGNING_KEY =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             "mac.signing-key-developer-id-installer",
             String.class,
             params -> {
@@ -141,7 +143,7 @@ public class MacPkgBundler extends MacBaseInstallerBundler {
             (s, p) -> s);
 
     public static final BundlerParamInfo<String> INSTALLER_SUFFIX =
-            new StandardBundlerParam<> (
+            new BundlerParamInfo<> (
             "mac.pkg.installerName.suffix",
             String.class,
             params -> "",

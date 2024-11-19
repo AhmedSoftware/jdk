@@ -25,6 +25,9 @@
 
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.ConfigException;
+import jdk.jpackage.internal.model.PackagerException;
+import jdk.jpackage.internal.model.ApplicationLayout;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -43,7 +46,7 @@ import jdk.jpackage.internal.util.FileUtils;
 public abstract class MacBaseInstallerBundler extends AbstractBundler {
 
     private final BundlerParamInfo<Path> APP_IMAGE_TEMP_ROOT =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             "mac.app.imageRoot",
             Path.class,
             params -> {
@@ -61,28 +64,28 @@ public abstract class MacBaseInstallerBundler extends AbstractBundler {
             (s, p) -> Path.of(s));
 
     public static final BundlerParamInfo<String> SIGNING_KEY_USER =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             Arguments.CLIOptions.MAC_SIGNING_KEY_NAME.getId(),
             String.class,
             params -> "",
             null);
 
     public static final BundlerParamInfo<String> SIGNING_KEYCHAIN =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             Arguments.CLIOptions.MAC_SIGNING_KEYCHAIN.getId(),
             String.class,
             params -> "",
             null);
 
     public static final BundlerParamInfo<String> INSTALLER_SIGN_IDENTITY =
-            new StandardBundlerParam<>(
+            new BundlerParamInfo<>(
             Arguments.CLIOptions.MAC_INSTALLER_SIGN_IDENTITY.getId(),
             String.class,
             params -> "",
             null);
 
     public static final BundlerParamInfo<String> MAC_INSTALLER_NAME =
-            new StandardBundlerParam<> (
+            new BundlerParamInfo<> (
             "mac.installerName",
             String.class,
             params -> {
@@ -154,11 +157,12 @@ public abstract class MacBaseInstallerBundler extends AbstractBundler {
                             "message.app-image-requires-app-name.advice"));
             }
             if (AppImageFile.load(applicationImage).isSigned()) {
+                var appLayout = ApplicationLayoutUtils.PLATFORM_APPLICATION_LAYOUT.resolveAt(applicationImage);
                 if (!Files.exists(
-                        PackageFile.getPathInAppImage(applicationImage))) {
+                        PackageFile.getPathInAppImage(appLayout))) {
                     Log.info(MessageFormat.format(I18N.getString(
                             "warning.per.user.app.image.signed"),
-                            PackageFile.getPathInAppImage(applicationImage)));
+                            PackageFile.getPathInAppImage(appLayout)));
                 }
             } else {
                 if (Optional.ofNullable(
@@ -189,7 +193,7 @@ public abstract class MacBaseInstallerBundler extends AbstractBundler {
             if (!StandardBundlerParam.isRuntimeInstaller(params) &&
                     !AppImageFile.load(predefinedImage).isSigned()) {
                 new PackageFile(APP_NAME.fetchFrom(params)).save(
-                        ApplicationLayout.macAppImage().resolveAt(appDir));
+                        ApplicationLayoutUtils.PLATFORM_APPLICATION_LAYOUT.resolveAt(appDir));
                 // We need to re-sign app image after adding ".package" to it.
                 // We only do this if app image was not signed which means it is
                 // signed with ad-hoc signature. App bundles with ad-hoc

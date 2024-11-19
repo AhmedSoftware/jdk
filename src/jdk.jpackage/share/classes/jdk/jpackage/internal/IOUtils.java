@@ -25,6 +25,7 @@
 
 package jdk.jpackage.internal;
 
+import jdk.jpackage.internal.model.PackagerException;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.IOException;
@@ -40,7 +41,7 @@ import java.util.List;
  *
  * A collection of static utility methods.
  */
-public class IOUtils {
+final class IOUtils {
 
     public static void copyFile(Path sourceFile, Path destFile)
             throws IOException {
