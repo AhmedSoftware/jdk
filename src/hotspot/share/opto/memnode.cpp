@@ -1976,13 +1976,15 @@ LoadNode::load_array_final_field(const TypeKlassPtr *tkls,
   if (tkls->offset() == in_bytes(Klass::modifier_flags_offset())) {
     // The field is Klass::_modifier_flags.  Return its (constant) value.
     // (Folds up the 2nd indirection in aClassConstant.getModifiers().)
-    assert(this->Opcode() == Op_LoadI, "must load an int from _modifier_flags");
+    if (this->Opcode() != Op_LoadS) { dump(2); }
+    assert(this->Opcode() == Op_LoadS, "must load an int from _modifier_flags");
     return TypeInt::make(klass->modifier_flags());
   }
   if (tkls->offset() == in_bytes(Klass::access_flags_offset())) {
     // The field is Klass::_access_flags.  Return its (constant) value.
     // (Folds up the 2nd indirection in Reflection.getClassAccessFlags(aClassConstant).)
-    assert(this->Opcode() == Op_LoadI, "must load an int from _access_flags");
+    if (this->Opcode() != Op_LoadS) { dump(2); }
+    assert(this->Opcode() == Op_LoadS, "must load a short from _access_flags");
     return TypeInt::make(klass->access_flags());
   }
   if (tkls->offset() == in_bytes(Klass::misc_flags_offset())) {
