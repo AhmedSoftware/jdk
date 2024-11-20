@@ -4052,7 +4052,7 @@ bool LibraryCallKit::inline_native_Class_query(vmIntrinsics::ID id) {
 
   case vmIntrinsics::_getClassAccessFlags:
     p = basic_plus_adr(kls, in_bytes(Klass::access_flags_offset()));
-    query_value = make_load(nullptr, p, TypeInt::INT, T_INT, MemNode::unordered);
+    query_value = make_load(nullptr, p, TypeInt::SHORT, T_SHORT, MemNode::unordered);
     break;
 
   default:
