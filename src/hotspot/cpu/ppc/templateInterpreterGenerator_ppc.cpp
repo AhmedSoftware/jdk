@@ -823,7 +823,7 @@ void TemplateInterpreterGenerator::lock_method(Register Rflags, Register Rscratc
 
   {
     if (!flags_preloaded) {
-      __ lnz(Rflags, method_(access_flags));
+      __ lhz(Rflags, method_(access_flags));
     }
 
 #ifdef ASSERT
