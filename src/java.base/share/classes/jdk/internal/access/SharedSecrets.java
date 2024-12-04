@@ -89,6 +89,7 @@ public class SharedSecrets {
     private static JavaUtilJarAccess javaUtilJarAccess;
     private static JavaUtilZipFileAccess javaUtilZipFileAccess;
     private static JavaUtilResourceBundleAccess javaUtilResourceBundleAccess;
+    private static JavaUtilFormatterAccess javaUtilFormatterAccess;
     private static JavaSecurityAccess javaSecurityAccess;
     private static JavaSecurityPropertiesAccess javaSecurityPropertiesAccess;
     private static JavaSecuritySignatureAccess javaSecuritySignatureAccess;
@@ -350,6 +351,19 @@ public class SharedSecrets {
 
     public static void setJavaUtilZipFileAccess(JavaUtilZipFileAccess access) {
         javaUtilZipFileAccess = access;
+    }
+
+    public static JavaUtilFormatterAccess getJavaUtilFormatterAccess() {
+        var access = javaUtilFormatterAccess;
+        if (access == null) {
+            ensureClassInitialized(java.util.Formatter.class);
+            access = javaUtilFormatterAccess;
+        }
+        return access;
+    }
+
+    public static void setJavaUtilFormatterAccess(JavaUtilFormatterAccess access) {
+        javaUtilFormatterAccess = access;
     }
 
     public static void setJavaAWTAccess(JavaAWTAccess jaa) {
