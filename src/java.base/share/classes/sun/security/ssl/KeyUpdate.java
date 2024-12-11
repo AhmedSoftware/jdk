@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,9 +52,9 @@ final class KeyUpdate {
 
     /**
      * The KeyUpdate handshake message.
-     *
+     * <p>
      * The KeyUpdate handshake message is used to indicate that the sender is
-     * updating its sending cryptographic keys.
+     * updating its sending cryptographic keys
      *
      *       enum {
      *           update_not_requested(0), update_requested(1), (255)
@@ -62,7 +62,7 @@ final class KeyUpdate {
      *
      *       struct {
      *           KeyUpdateRequest request_update;
-     *       } KeyUpdate;
+     *       } KeyUpdate
      */
     static final class KeyUpdateMessage extends HandshakeMessage {
         private final KeyUpdateRequest status;
@@ -215,6 +215,18 @@ final class KeyUpdate {
             }
 
             SecretKey nplus1 = skd.deriveKey("TlsUpdateNplus1", null);
+
+//          XXX:  Add debug output for the *_TRAFFIC_SECRET_# for KeyUpdates.
+//          Need to determine role and key update generation number (decimal).
+//
+//          e.g. CLIENT_TRAFFIC_SECRET_1 or SERVER_TRAFFIC_SECRET_2
+//            if (TLSKeyLogger.INSTANCE != null) {
+//                TLSKeyLogger.INSTANCE.log(
+//                        TLSKeyLoggerLabel.*_TRAFFIC_SECRET,
+//                        chc.clientHelloRandom.randomBytes,
+//                        writeSecret);
+//            }
+
             SSLKeyDerivation kd = kdg.createKeyDerivation(hc, nplus1);
             SecretKey key = kd.deriveKey("TlsKey", null);
             IvParameterSpec ivSpec = new IvParameterSpec(
@@ -294,6 +306,18 @@ final class KeyUpdate {
             }
 
             SecretKey nplus1 = skd.deriveKey("TlsUpdateNplus1", null);
+
+//          XXX:  Add debug output for the *_TRAFFIC_SECRET_# for KeyUpdates.
+//          Need to determine role and key update generation number (decimal).
+//
+//          e.g. CLIENT_TRAFFIC_SECRET_1 or SERVER_TRAFFIC_SECRET_2
+//            if (TLSKeyLogger.INSTANCE != null) {
+//                TLSKeyLogger.INSTANCE.log(
+//                        TLSKeyLoggerLabel.*_TRAFFIC_SECRET,
+//                        chc.clientHelloRandom.randomBytes,
+//                        writeSecret);
+//            }
+
             SSLKeyDerivation kd = kdg.createKeyDerivation(hc, nplus1);
             SecretKey key = kd.deriveKey("TlsKey", null);
             IvParameterSpec ivSpec = new IvParameterSpec(
