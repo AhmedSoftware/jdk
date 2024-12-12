@@ -107,7 +107,7 @@ requires.properties= \
     jlink.packagedModules
 
 # Minimum jtreg version
-requiredVersion=7.4+1
+requiredVersion=7.5+1
 
 # Path to libraries in the topmost test directory. This is needed so @library
 # does not need ../../ notation to reach them
