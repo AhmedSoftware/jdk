@@ -36,7 +36,7 @@ import java.util.Objects;
  * @see java.net.NetworkInterface
  * @since 1.6
  */
-public class InterfaceAddress {
+public final class InterfaceAddress {
     private InetAddress address = null;
     private Inet4Address broadcast = null;
     private short        maskLength = 0;
