@@ -1240,6 +1240,11 @@ bool os::is_readable_range(const void* from, const void* to) {
   return true;
 }
 
+#ifdef _LP64
+static intptr_t badResourceValueWord = 0xabababababababab;
+#else
+static intptr_t badResourceValueWord = 0xabababab;
+#endif
 
 // moved from debug.cpp (used to be find()) but still called from there
 // The verbose parameter is only set by the debug code in one case
@@ -1352,14 +1357,48 @@ void os::print_location(outputStream* st, intptr_t x, bool verbose) {
     for (address p = addr; p < align_up(addr + 1, sizeof(intptr_t)); ++p) {
       st->print(" %02x", *(u1*)p);
     }
+#ifndef PRODUCT
+    // corruption or uninitialized access pattern
+    if (is_aligned(addr, sizeof(intptr_t))) {
+      if (badResourceValueWord == *(intptr_t*)addr) {
+        st->print(" <= unused storage marker found");
+      }
+    }
+#endif // PRODUCT
     st->cr();
     return;
   }
-
 #endif // !INCLUDE_ASAN
 
   st->print_cr(INTPTR_FORMAT " is an unknown value", p2i(addr));
+}
 
+void os::print_reg(outputStream *st, const char* reg, intptr_t val) {
+#ifndef PRODUCT
+  // corruption or uninitialized access pattern
+  // deadbeef is also 'not good', but seems to occur very seldom, at least in registers
+  const intptr_t db1 = 0xdeadbeef;
+#ifdef _LP64
+  const intptr_t db2 = 0xdeadbeef00000000;
+  const intptr_t val1 = val >> 32;
+  const intptr_t val2 = val << 32;
+#endif
+  if (val == badResourceValueWord) {
+    st->print_cr("%s" INTPTR_FORMAT " <= unused storage marker found", reg, val);
+  } else {
+#ifdef _LP64
+    if (val1 == db1 || val2 == db2) {
+#else
+    if (val == db1) {
+#endif
+      st->print_cr("%s" INTPTR_FORMAT " <= bad value marker found", reg, val);
+    } else {
+#endif // PRODUCT
+      st->print_cr("%s" INTPTR_FORMAT, reg, val);
+#ifndef PRODUCT
+    }
+  }
+#endif
 }
 
 static bool is_pointer_bad(intptr_t* ptr) {
