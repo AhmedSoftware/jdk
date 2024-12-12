@@ -999,6 +999,9 @@ public class TransformerFactoryImpl
         // Set the attributes for translet generation
         int outputType = XSLTC.BYTEARRAY_OUTPUT;
         if (_generateTranslet || _autoTranslet) {
+            if (_packageName != null)
+                xsltc.setPackageName(_packageName);
+
             // Set the translet name
             xsltc.setClassName(getTransletBaseName(source));
 
@@ -1014,9 +1017,6 @@ public class TransformerFactoryImpl
                         xsltc.setDestDirectory(xslDir);
                 }
             }
-
-            if (_packageName != null)
-                xsltc.setPackageName(_packageName);
 
             if (_jarFileName != null) {
                 xsltc.setJarFileName(_jarFileName);
