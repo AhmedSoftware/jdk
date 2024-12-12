@@ -548,6 +548,11 @@ bool LibraryCallKit::try_to_inline(int predicate) {
   case vmIntrinsics::_doubleIsFinite:
   case vmIntrinsics::_doubleIsInfinite:         return inline_fp_range_check(intrinsic_id());
 
+  case vmIntrinsics::_RelaxedMath_float_add:
+  case vmIntrinsics::_RelaxedMath_float_mul:
+  case vmIntrinsics::_RelaxedMath_double_add:
+  case vmIntrinsics::_RelaxedMath_double_mul:   return inline_relaxed_math(intrinsic_id());
+
   case vmIntrinsics::_numberOfLeadingZeros_i:
   case vmIntrinsics::_numberOfLeadingZeros_l:
   case vmIntrinsics::_numberOfTrailingZeros_i:
@@ -5001,6 +5006,32 @@ bool LibraryCallKit::inline_fp_range_check(vmIntrinsics::ID id) {
     break;
   case vmIntrinsics::_doubleIsFinite:
     result = new IsFiniteDNode(arg);
+    break;
+  default:
+    fatal_unexpected_iid(id);
+    break;
+  }
+  set_result(_gvn.transform(result));
+  return true;
+}
+
+bool LibraryCallKit::inline_relaxed_math(vmIntrinsics::ID id) {
+  Node* n1 = argument(0);
+  Node* n2 = argument(1);
+  Node* result = nullptr;
+
+  switch (id) {
+  case vmIntrinsics::_RelaxedMath_float_add:
+    result = new RelaxedMathAddFNode(n1, n2);
+    break;
+  case vmIntrinsics::_RelaxedMath_float_mul:
+    result = new MulFNode(n1, n2);
+    break;
+  case vmIntrinsics::_RelaxedMath_double_add:
+    result = new AddDNode(n1, n2);
+    break;
+  case vmIntrinsics::_RelaxedMath_double_mul:
+    result = new MulDNode(n1, n2);
     break;
   default:
     fatal_unexpected_iid(id);

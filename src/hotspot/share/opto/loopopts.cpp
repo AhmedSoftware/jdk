@@ -568,6 +568,7 @@ Node* PhaseIdealLoop::remix_address_expressions(Node* n) {
   if (n_op == Op_AddI ||
       n_op == Op_AddL ||
       n_op == Op_AddF ||
+      n_op == Op_RelaxedMathAddF ||
       n_op == Op_AddD ||
       n_op == Op_MulI ||
       n_op == Op_MulL ||
@@ -4668,7 +4669,7 @@ void PhaseIdealLoop::move_unordered_reduction_out_of_loop(IdealLoopTree* loop) {
 
     // Create post-loop reduction.
     Node* last_accumulator = phi->in(2);
-    Node* post_loop_reduction = ReductionNode::make(sopc, nullptr, init, last_accumulator, bt);
+    Node* post_loop_reduction = ReductionNode::make(sopc, nullptr, init, last_accumulator, bt, false);
 
     // Take over uses of last_accumulator that are not in the loop.
     for (DUIterator i = last_accumulator->outs(); last_accumulator->has_out(i); i++) {
