@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,6 +52,13 @@ class PhaseStringOpts : public Phase {
   // Examine the use of the SB alloc to see if it can be replace with
   // a single string construction.
   StringConcat* build_candidate(CallStaticJavaNode* call);
+
+  enum class CheckAppendResult { GoodAppend,
+                                 NotAppend,
+                                 GiveUp };
+
+  // Called from build_candidate. Looks at a call that might be an append. If so, adds it to the StringConcat.
+  CheckAppendResult check_append_candidate(CallStaticJavaNode* cnode, StringConcat* sc, ciMethod* m, ciSymbol* string_sig, ciSymbol* int_sig, ciSymbol* char_sig);
 
   // Replace all the SB calls in concat with an optimization String allocation
   void replace_string_concat(StringConcat* concat);
