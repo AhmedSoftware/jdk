@@ -2981,7 +2981,7 @@ u2 ClassFileParser::parse_classfile_inner_classes_attribute(const ClassFileStrea
                          "Class is both outer and inner class in class file %s", CHECK_0);
     }
     // Access flags
-    jint flags;
+    u2 flags;
     // JVM_ACC_MODULE is defined in JDK-9 and later.
     if (_major_version >= JAVA_9_VERSION) {
       flags = cfs->get_u2_fast() & (RECOGNIZED_INNER_CLASS_MODIFIERS | JVM_ACC_MODULE);
@@ -2998,7 +2998,7 @@ u2 ClassFileParser::parse_classfile_inner_classes_attribute(const ClassFileStrea
     inner_classes->at_put(index++, inner_class_info_index);
     inner_classes->at_put(index++, outer_class_info_index);
     inner_classes->at_put(index++, inner_name_index);
-    inner_classes->at_put(index++, inner_access_flags.as_short());
+    inner_classes->at_put(index++, inner_access_flags.as_int());
   }
 
   // Check for circular and duplicate entries.
@@ -5478,7 +5478,7 @@ void ClassFileParser::parse_stream(const ClassFileStream* const stream,
   stream->guarantee_more(8, CHECK);  // flags, this_class, super_class, infs_len
 
   // Access flags
-  jint flags;
+  u2 flags;
   // JVM_ACC_MODULE is defined in JDK-9 and later.
   if (_major_version >= JAVA_9_VERSION) {
     flags = stream->get_u2_fast() & (JVM_RECOGNIZED_CLASS_MODIFIERS | JVM_ACC_MODULE);
