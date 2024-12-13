@@ -22,6 +22,7 @@
  *
  */
 
+#include <opto/c2_globals.hpp>
 #include "precompiled.hpp"
 #include "ci/ciMethod.hpp"
 #include "ci/ciMethodBlocks.hpp"
@@ -629,6 +630,11 @@ void MethodLiveness::BasicBlock::compute_gen_kill_single(ciBytecodeStream *instr
         // return from Object.init implicitly registers a finalizer
         // for the receiver if needed, so keep it alive.
         load_one(0);
+      }
+      if (StressReachabilityFence) {
+        if (instruction->method()->is_static() == false) {
+          load_one(0); // would keep it always alive until return but only for non-static
+        }
       }
       break;
 
