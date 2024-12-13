@@ -489,16 +489,15 @@ uint G1Policy::calculate_desired_eden_length_before_mixed(double base_time_ms,
                                                           uint min_eden_length,
                                                           uint max_eden_length) const {
   uint min_marking_candidates = MIN2(calc_min_old_cset_length(candidates()->last_marking_candidates_length()),
-                                     candidates()->marking_regions_length());
+                                     candidates()->from_marking_groups().num_regions());
   double predicted_region_evac_time_ms = base_time_ms;
-  for (G1CollectionSetCandidateInfo* ci : candidates()->marking_regions()) {
-    // We optimistically assume that any of these marking candidate regions will
-    // not be pinned, so just consider them as normal.
-    if (min_marking_candidates == 0) {
+  uint selected_candidates = 0;
+  for (G1CSetCandidateGroup* gr : candidates()->from_marking_groups()) {
+    if (selected_candidates >= min_marking_candidates) {
       break;
     }
-    predicted_region_evac_time_ms += predict_region_total_time_ms(ci->_r, false /* for_young_only_phase */);
-    min_marking_candidates--;
+    predicted_region_evac_time_ms += gr->predict_group_total_time_ms();
+    selected_candidates += gr->length();
   }
 
   return calculate_desired_eden_length_before_young_only(predicted_region_evac_time_ms,
@@ -524,12 +523,13 @@ double G1Policy::predict_retained_regions_evac_time() const {
 
   double result = 0.0;
 
-  G1CollectionCandidateList& list = candidates()->retained_regions();
+  G1CSetCandidateGroupList* retained_groups = &candidates()->retained_groups();
   uint min_regions_left = MIN2(min_retained_old_cset_length(),
-                               list.length());
+                               retained_groups->num_regions());
 
-  for (G1CollectionSetCandidateInfo* ci : list) {
-    G1HeapRegion* r = ci->_r;
+  for (G1CSetCandidateGroup* group : *retained_groups) {
+    assert(group->length() == 1, "We should only have one region in a retained group");
+    G1HeapRegion* r = group->region_at(0); // We only have one region per group.
     // We optimistically assume that any of these marking candidate regions will
     // be reclaimable the next gc, so just consider them as normal.
     if (r->has_pinned_objects()) {
@@ -545,7 +545,7 @@ double G1Policy::predict_retained_regions_evac_time() const {
   }
 
   log_trace(gc, ergo, heap)("Selected %u of %u retained candidates (pinned %u) taking %1.3fms additional time",
-                            num_regions, list.length(), num_pinned_regions, result);
+                            num_regions, retained_groups->num_regions(), num_pinned_regions, result);
   return result;
 }
 
@@ -1112,6 +1112,10 @@ double G1Policy::predict_young_region_other_time_ms(uint count) const {
   return _analytics->predict_young_other_time_ms(count);
 }
 
+double G1Policy::predict_non_young_other_time_ms(uint count) const {
+  return _analytics->predict_non_young_other_time_ms(count);
+}
+
 double G1Policy::predict_eden_copy_time_ms(uint count, size_t* bytes_to_copy) const {
   if (count == 0) {
     return 0.0;
@@ -1135,6 +1139,14 @@ double G1Policy::predict_region_merge_scan_time(G1HeapRegion* hr, bool for_young
   return
     _analytics->predict_card_merge_time_ms(card_rs_length, for_young_only_phase) +
     _analytics->predict_card_scan_time_ms(scan_card_num, for_young_only_phase);
+}
+
+double G1Policy::predict_merge_scan_time(size_t card_rs_length)  const {
+  size_t scan_card_num = _analytics->predict_scan_card_num(card_rs_length, false);
+
+  return
+    _analytics->predict_card_merge_time_ms(card_rs_length, false) +
+    _analytics->predict_card_scan_time_ms(scan_card_num, false);
 }
 
 double G1Policy::predict_region_code_root_scan_time(G1HeapRegion* hr, bool for_young_only_phase) const {
@@ -1340,11 +1352,6 @@ void G1Policy::record_concurrent_mark_cleanup_end(bool has_rebuilt_remembered_se
 }
 
 void G1Policy::abandon_collection_set_candidates() {
-  // Clear remembered sets of remaining candidate regions and the actual candidate
-  // set.
-  for (G1HeapRegion* r : *candidates()) {
-    r->rem_set()->clear(true /* only_cardset */);
-  }
   _collection_set->abandon_all_candidates();
 }
 
