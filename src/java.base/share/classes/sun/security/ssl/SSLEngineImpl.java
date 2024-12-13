@@ -330,7 +330,7 @@ final class SSLEngineImpl extends SSLEngine implements SSLTransport {
             // application data may be discarded accordingly.  As could
             // be an issue for some applications.  This impact can be
             // mitigated by sending the last flight twice.
-            if (SSLLogger.isOn && SSLLogger.isOn("ssl,verbose")) {
+            if (SSLLogger.isOn && SSLLogger.isOn("ssl,record")) {
                 SSLLogger.finest("retransmit the last flight messages");
             }
 
@@ -612,7 +612,7 @@ final class SSLEngineImpl extends SSLEngine implements SSLTransport {
         } catch (SSLException ssle) {
             // Need to discard invalid records for DTLS protocols.
             if (sslContext.isDTLS()) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl,verbose")) {
+                if (SSLLogger.isOn && SSLLogger.isOn("ssl,record")) {
                     SSLLogger.finest("Discard invalid DTLS records", ssle);
                 }
 

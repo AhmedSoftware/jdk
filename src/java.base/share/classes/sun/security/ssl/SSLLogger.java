@@ -61,6 +61,7 @@ public final class SSLLogger {
     private static final System.Logger logger;
     private static final String property;
     public static final boolean isOn;
+    static EnumSet<ComponentToken> activeComponents = EnumSet.noneOf(ComponentToken.class);
 
     static {
         String p = System.getProperty("javax.net.debug");
@@ -68,15 +69,41 @@ public final class SSLLogger {
             if (p.isEmpty()) {
                 property = "";
                 logger = System.getLogger("javax.net.ssl");
+                activeComponents.add(ComponentToken.EMPTYALL);
             } else {
                 property = p.toLowerCase(Locale.ENGLISH);
-                if (property.equals("help")) {
+                if (property.contains("help")) {
                     help();
                 }
-
                 logger = new SSLConsoleLogger("javax.net.ssl", p);
+                if (property.contains("all")) {
+                    activeComponents.add(ComponentToken.EMPTYALL);
+                } else {
+                    String tmpProperty = property;
+                    for (ComponentToken o : ComponentToken.values()) {
+                        if (tmpProperty.contains(o.component)) {
+                            activeComponents.add(o);
+                            // remove the pattern to avoid it being reused
+                            // e.g. "ssl,sslctx" parsing
+                            tmpProperty = tmpProperty.replaceFirst(o.component, "");
+                        }
+                    }
+                    // some rules to check
+                    if ((activeComponents.contains(ComponentToken.PLAINTEXT)
+                            || activeComponents.contains(ComponentToken.PACKET))
+                            && !activeComponents.contains(ComponentToken.RECORD)) {
+                        activeComponents.remove(ComponentToken.PLAINTEXT);
+                        activeComponents.remove(ComponentToken.PACKET);
+                    }
+
+                    if (activeComponents.contains(ComponentToken.VERBOSE)
+                            && !activeComponents.contains(ComponentToken.HANDSHAKE)) {
+                        activeComponents.remove(ComponentToken.VERBOSE);
+                    }
+                }
             }
-            isOn = true;
+            isOn = activeComponents.contains(ComponentToken.EMPTYALL)
+                    || activeComponents.contains(ComponentToken.SSL);
         } else {
             property = null;
             logger = null;
@@ -86,27 +113,24 @@ public final class SSLLogger {
 
     private static void help() {
         System.err.println();
-        System.err.println("help           print the help messages");
-        System.err.println("expand         expand debugging information");
+        System.err.println("help           print this help message and exit");
+        System.err.println("expand         expanded (less compact) output format");
         System.err.println();
         System.err.println("all            turn on all debugging");
         System.err.println("ssl            turn on ssl debugging");
         System.err.println();
         System.err.println("The following can be used with ssl:");
-        System.err.println("\trecord       enable per-record tracing");
-        System.err.println("\thandshake    print each handshake message");
-        System.err.println("\tkeygen       print key generation data");
-        System.err.println("\tsession      print session activity");
         System.err.println("\tdefaultctx   print default SSL initialization");
-        System.err.println("\tsslctx       print SSLContext tracing");
-        System.err.println("\tsessioncache print session cache tracing");
+        System.err.println("\thandshake    print each handshake message");
         System.err.println("\tkeymanager   print key manager tracing");
+        System.err.println("\trecord       enable per-record tracing");
+        System.err.println("\trespmgr      print OCSP response tracing");
+        System.err.println("\tsession      print session activity");
+        System.err.println("\tsslctx       print SSLContext tracing");
         System.err.println("\ttrustmanager print trust manager tracing");
-        System.err.println("\tpluggability print pluggability tracing");
         System.err.println();
         System.err.println("\thandshake debugging can be widened with:");
-        System.err.println("\tdata         hex dump of each handshake message");
-        System.err.println("\tverbose      verbose handshake message printing");
+        System.err.println("\tverbose   verbose handshake message printing");
         System.err.println();
         System.err.println("\trecord debugging can be widened with:");
         System.err.println("\tplaintext    hex dump of record plaintext");
@@ -117,43 +141,48 @@ public final class SSLLogger {
 
     /**
      * Return true if the "javax.net.debug" property contains the
-     * debug check points, or System.Logger is used.
+     * debug check points, "all" or if the System.Logger is used.
+     *
+     * Specify all string tokens required when calling this method.
+     * E.g. since "plaintext" is a widened option of the "record" option,
+     * the call needs to be isOn("ssl,record,plaintext") to ensure
+     * correct use. It also ensures that the user specifies the correct
+     * system property value syntax as per help menu.
      */
     public static boolean isOn(String checkPoints) {
-        if (property == null) {              // debugging is turned off
+        if (!isOn) {
             return false;
-        } else if (property.isEmpty()) {     // use System.Logger
+        }
+
+        if (activeComponents.contains(ComponentToken.EMPTYALL)) {
+            // System.Logger in use or property = "all"
             return true;
-        }                                   // use provider logger
+        }
+
+        if (checkPoints.equals("ssl")) {
+            return !ComponentToken.isSslFilteringEnabled();
+        }
+
+        if (activeComponents.size() == 1 && !containsWidenOption(checkPoints)) {
+            // in ssl mode, we always log except for widen options
+            return true;
+        }
 
         String[] options = checkPoints.split(",");
         for (String option : options) {
-            option = option.trim();
-            if (!SSLLogger.hasOption(option)) {
+            option = option.trim().toLowerCase(Locale.ROOT);
+            if (!property.contains(option)) {
                 return false;
             }
         }
-
         return true;
     }
 
-    private static boolean hasOption(String option) {
-        option = option.toLowerCase(Locale.ENGLISH);
-        if (property.contains("all")) {
-            return true;
-        } else {
-            int offset = property.indexOf("ssl");
-            if (offset != -1 && property.indexOf("sslctx", offset) != -1) {
-                // don't enable data and plaintext options by default
-                if (!(option.equals("data")
-                        || option.equals("packet")
-                        || option.equals("plaintext"))) {
-                    return true;
-                }
-            }
-        }
-
-        return property.contains(option);
+    private static boolean containsWidenOption(String options) {
+        return options.contains("verbose")
+                || options.contains("plaintext")
+                || options.contains("packet")
+                || options.contains("expand");
     }
 
     public static void severe(String msg, Object... params) {
@@ -186,9 +215,7 @@ public final class SSLLogger {
                 logger.log(level, msg);
             } else {
                 try {
-                    String formatted =
-                            SSLSimpleFormatter.formatParameters(params);
-                    logger.log(level, msg, formatted);
+                     logger.log(level, () -> msg + ":\n" + SSLSimpleFormatter.formatParameters(params));
                 } catch (Exception exp) {
                     // ignore it, just for debugging.
                 }
@@ -212,6 +239,40 @@ public final class SSLLogger {
         }
         return false;
     }
+
+    enum ComponentToken {
+        EMPTYALL,
+        DEFAULTCTX,
+        HANDSHAKE,
+        KEYMANAGER,
+        RECORD,
+        RESPMGR,
+        SESSION,
+        SSLCTX,
+        TRUSTMANAGER,
+        VERBOSE,
+        PLAINTEXT,
+        PACKET,
+        SSL; // define ssl last, helps with sslctx matching later.
+
+        final String component;
+
+        ComponentToken() {
+            this.component = this.toString().toLowerCase(Locale.ROOT);
+        }
+
+        static boolean isSslFilteringEnabled() {
+            return activeComponents.contains(DEFAULTCTX)
+                    || activeComponents.contains(HANDSHAKE)
+                    || activeComponents.contains(KEYMANAGER)
+                    || activeComponents.contains(RECORD)
+                    || activeComponents.contains(RESPMGR)
+                    || activeComponents.contains(SESSION)
+                    || activeComponents.contains(SSLCTX)
+                    || activeComponents.contains(TRUSTMANAGER);
+        }
+    }
+
 
     private static class SSLConsoleLogger implements Logger {
         private final String loggerName;
@@ -280,7 +341,7 @@ public final class SSLLogger {
                         """,
                 Locale.ENGLISH);
 
-        private static final MessageFormat extendedCertFormart =
+        private static final MessageFormat extendedCertFormat =
             new MessageFormat(
                     """
                             "version"            : "v{0}",
@@ -296,15 +357,6 @@ public final class SSLLogger {
                             ]
                             """,
                 Locale.ENGLISH);
-
-        //
-        // private static MessageFormat certExtFormat = new MessageFormat(
-        //         "{0} [{1}] '{'\n" +
-        //         "  critical: {2}\n" +
-        //         "  value: {3}\n" +
-        //         "'}'",
-        //         Locale.ENGLISH);
-        //
 
         private static final MessageFormat messageFormatNoParas =
             new MessageFormat(
@@ -519,7 +571,7 @@ public final class SSLLogger {
                         Utilities.indent(extBuilder.toString())
                         };
                     builder.append(Utilities.indent(
-                            extendedCertFormart.format(certFields)));
+                            extendedCertFormat.format(certFields)));
                 }
             } catch (Exception ce) {
                 // ignore the exception

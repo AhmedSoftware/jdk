@@ -370,7 +370,7 @@ public final class SSLSocketImpl
             // start handshaking, if failed, the connection will be closed.
             ensureNegotiated(false);
         } catch (IOException ioe) {
-            if (SSLLogger.isOn && SSLLogger.isOn("handshake")) {
+            if (SSLLogger.isOn && SSLLogger.isOn("ssl,handshake")) {
                 SSLLogger.severe("handshake failed", ioe);
             }
 

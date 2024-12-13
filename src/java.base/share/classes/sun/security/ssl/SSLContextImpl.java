@@ -383,7 +383,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                         suites.add(suite);
                         isSupported = true;
                     } else if (SSLLogger.isOn &&
-                            SSLLogger.isOn("ssl,sslctx,verbose")) {
+                            SSLLogger.isOn("ssl,handshake")) {
                         SSLLogger.fine(
                                 "Ignore disabled cipher suite: " + suite.name);
                     }
@@ -392,7 +392,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                 }
 
                 if (!isSupported && SSLLogger.isOn &&
-                        SSLLogger.isOn("ssl,sslctx,verbose")) {
+                        SSLLogger.isOn("ssl,handshake")) {
                     SSLLogger.finest(
                             "Ignore unsupported cipher suite: " + suite);
                 }

@@ -210,8 +210,7 @@ class DomainName {
                 is = new FileInputStream(f);
             } catch (FileNotFoundException e) { }
             if (is == null) {
-                if (SSLLogger.isOn && SSLLogger.isOn("ssl") &&
-                        SSLLogger.isOn("trustmanager")) {
+                if (SSLLogger.isOn && SSLLogger.isOn("ssl,trustmanager")) {
                     SSLLogger.fine(
                         "lib/security/public_suffix_list.dat not found");
                 }
