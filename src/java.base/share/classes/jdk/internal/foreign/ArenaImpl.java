@@ -26,10 +26,7 @@
 package jdk.internal.foreign;
 
 import java.lang.foreign.Arena;
-import java.lang.foreign.MemoryLayout;
-import java.lang.foreign.MemorySegment;
 import java.lang.foreign.MemorySegment.Scope;
-import java.util.Objects;
 
 public final class ArenaImpl implements Arena {
 
@@ -51,14 +48,11 @@ public final class ArenaImpl implements Arena {
     }
 
     public NativeMemorySegmentImpl allocateNoInit(long byteSize, long byteAlignment) {
-        Utils.checkAllocationSizeAndAlign(byteSize, byteAlignment);
-        return SegmentFactories.allocateSegment(byteSize, byteAlignment, session, shouldReserveMemory);
+        return SegmentFactories.allocateNativeSegment(byteSize, byteAlignment, session, shouldReserveMemory, false);
     }
 
     @Override
     public NativeMemorySegmentImpl allocate(long byteSize, long byteAlignment) {
-        NativeMemorySegmentImpl segment = allocateNoInit(byteSize, byteAlignment);
-        segment.fill((byte)0);
-        return segment;
+        return SegmentFactories.allocateNativeSegment(byteSize, byteAlignment, session, shouldReserveMemory, true);
     }
 }
