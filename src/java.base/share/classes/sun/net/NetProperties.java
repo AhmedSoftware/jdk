@@ -26,16 +26,15 @@ package sun.net;
 
 import jdk.internal.util.StaticProperty;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
 import java.util.Properties;
 
-/*
+/**
  * This class allows for centralized access to Networking properties.
  * Default values are loaded from the file jre/lib/net.properties
  *
- *
  * @author Jean-Christophe Collet
- *
  */
 public class NetProperties {
     private static final Properties props = loadDefaultProperties(new Properties());
@@ -126,10 +125,7 @@ public class NetProperties {
         }
 
         if (val != null) {
-            try {
-                return Boolean.valueOf(val);
-            } catch (NumberFormatException ex) {
-            }
+            return Boolean.valueOf(val);
         }
         return null;
     }
