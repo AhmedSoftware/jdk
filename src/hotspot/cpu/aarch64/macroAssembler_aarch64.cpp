@@ -5521,9 +5521,8 @@ void MacroAssembler::movoop(Register dst, jobject obj) {
     mov(dst, Address((address)obj, rspec));
   } else {
     address dummy = address(uintptr_t(pc()) & -wordSize); // A nearby aligned address
-    ldr_constant(dst, Address(dummy, rspec));
+    ldr_patchable(dst, Address(dummy, rspec));
   }
-
 }
 
 // Move a metadata address into a register.

@@ -135,8 +135,6 @@ public:
 //
 // An nmethod contains:
 //  - header                 (the nmethod structure)
-//  [Relocation]
-//  - relocation information
 //  - constant part          (doubles, longs and floats used in nmethod)
 //  - oop table
 //  [Code]
@@ -236,7 +234,6 @@ class nmethod : public CodeBlob {
   uint16_t _num_stack_arg_slots;
 
   // Offsets in mutable data section
-  // _oops_offset == _data_offset,  offset where embedded oop table begins (inside data)
   uint16_t _metadata_offset; // embedded meta data table
 #if INCLUDE_JVMCI
   uint16_t _jvmci_data_offset;
@@ -305,13 +302,15 @@ class nmethod : public CodeBlob {
           int frame_size,
           ByteSize basic_lock_owner_sp_offset, /* synchronized natives only */
           ByteSize basic_lock_sp_offset,       /* synchronized natives only */
-          OopMapSet* oop_maps);
+          OopMapSet* oop_maps,
+          int mutable_data_size);
 
   // For normal JIT compiled code
   nmethod(Method* method,
           CompilerType type,
           int nmethod_size,
           int immutable_data_size,
+          int mutable_data_size,
           int compile_id,
           int entry_bci,
           address immutable_data,
@@ -526,22 +525,22 @@ public:
   address insts_begin           () const { return           code_begin()   ; }
   address insts_end             () const { return           header_begin() + _stub_offset             ; }
   address stub_begin            () const { return           header_begin() + _stub_offset             ; }
-  address stub_end              () const { return           data_begin()   ; }
+  address stub_end              () const { return           code_end()     ; }
   address exception_begin       () const { return           header_begin() + _exception_offset        ; }
   address deopt_handler_begin   () const { return           header_begin() + _deopt_handler_offset    ; }
   address deopt_mh_handler_begin() const { return           header_begin() + _deopt_mh_handler_offset ; }
   address unwind_handler_begin  () const { return _unwind_handler_offset != -1 ? (insts_end() - _unwind_handler_offset) : nullptr; }
 
   // mutable data
-  oop*    oops_begin            () const { return (oop*)        data_begin(); }
-  oop*    oops_end              () const { return (oop*)       (data_begin() + _metadata_offset)      ; }
-  Metadata** metadata_begin     () const { return (Metadata**) (data_begin() + _metadata_offset)      ; }
+  oop*    oops_begin            () const { return (oop*)       (mutable_data_begin() + _relocation_size); }
+  oop*    oops_end              () const { return (oop*)       (mutable_data_begin() + _metadata_offset); }
+  Metadata** metadata_begin     () const { return (Metadata**) (mutable_data_begin() + _metadata_offset); }
 #if INCLUDE_JVMCI
-  Metadata** metadata_end       () const { return (Metadata**) (data_begin() + _jvmci_data_offset)    ; }
-  address jvmci_data_begin      () const { return               data_begin() + _jvmci_data_offset     ; }
-  address jvmci_data_end        () const { return               data_end(); }
+  Metadata** metadata_end       () const { return (Metadata**) (mutable_data_begin() + _jvmci_data_offset); }
+  address jvmci_data_begin      () const { return               mutable_data_begin() + _jvmci_data_offset; }
+  address jvmci_data_end        () const { return               mutable_data_end(); }
 #else
-  Metadata** metadata_end       () const { return (Metadata**)  data_end(); }
+  Metadata** metadata_end       () const { return (Metadata**)  mutable_data_end(); }
 #endif
 
   // immutable data

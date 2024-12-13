@@ -1469,12 +1469,14 @@ public:
 
   public:
 
-  void ldr_constant(Register dest, const Address &const_addr) {
-    if (NearCpool) {
+  void ldr_patchable(Register dest, const Address &const_addr, bool fits_in_ldr_range = false) {
+    if (fits_in_ldr_range) {
+      intptr_t offset = pc() - const_addr.target();
+      assert(intptr_t(-1 * M) <= offset && offset < intptr_t(M), "pointer does not fit into pc-relative ldr range");
       ldr(dest, const_addr);
     } else {
       uint64_t offset;
-      adrp(dest, InternalAddress(const_addr.target()), offset);
+      adrp(dest, const_addr, offset);
       ldr(dest, Address(dest, offset));
     }
   }
