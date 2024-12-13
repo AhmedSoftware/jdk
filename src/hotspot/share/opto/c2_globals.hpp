@@ -809,6 +809,11 @@
   product(bool, UseStoreStoreForCtor, true, DIAGNOSTIC,                     \
           "Use StoreStore barrier instead of Release barrier at the end "   \
           "of constructors")                                                \
+                                                                            \
+  product(uintx, ShortLoopIter, 1000,                                       \
+          "long counted loop/long range checks: don't create loop nest if"  \
+          "loop runs for fewer iterations than ShortLoopIter")              \
+          range(0, max_juint)                                               \
 
 // end of C2_FLAGS
 
