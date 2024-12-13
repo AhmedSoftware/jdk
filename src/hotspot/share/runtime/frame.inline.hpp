@@ -76,7 +76,7 @@ inline address frame::get_deopt_original_pc() const {
 
   nmethod* nm = _cb->as_nmethod_or_null();
   if (nm != nullptr && nm->is_deopt_pc(_pc)) {
-    return nm->get_original_pc(this);
+    return get_original_pc(nm);
   }
   return nullptr;
 }

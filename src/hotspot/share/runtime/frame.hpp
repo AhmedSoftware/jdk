@@ -47,6 +47,7 @@ class Method;
 class methodHandle;
 class RegisterMap;
 class vframeArray;
+class jvmtiDeferredLocalVariableSet;
 
 enum class DerivedPointerIterationMode {
   _with_table,
@@ -125,6 +126,11 @@ class frame {
   // (a) the given PC belongs to an nmethod and
   // (b) it is a deopt PC
   address get_deopt_original_pc() const;
+
+  // Accessor/mutator for the original pc of a frame before a frame was deopted.
+  address get_original_pc(nmethod* nm) const;
+  void    set_original_pc(nmethod* nm, address pc);
+
 
   void set_pc(address newpc);
 
@@ -278,6 +284,10 @@ class frame {
 
   // Support for deoptimization
   void deoptimize(JavaThread* thread);
+
+  GrowableArray<jvmtiDeferredLocalVariableSet*>* deferred_locals() const;
+  GrowableArray<jvmtiDeferredLocalVariableSet*>* create_deferred_locals() const;
+  void clear_deferred_locals();
 
   // The frame's original SP, before any extension by an interpreted callee;
   // used for packing debug info into vframeArray objects and vframeArray lookup.
