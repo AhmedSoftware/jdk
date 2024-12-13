@@ -41,13 +41,12 @@ import sun.net.www.ParseUtil;
  *
  * @author      Michael McMahon
  */
-
-final class FileURLMapper {
+public class FileURLMapper {
 
     private final URL url;
     private String path;
 
-    FileURLMapper(URL url) {
+    public FileURLMapper(URL url) {
         this.url = url;
     }
 
@@ -55,17 +54,12 @@ final class FileURLMapper {
      * @return the platform specific path corresponding to the URL
      *  so long as the URL does not contain a hostname in the authority field.
      */
-    String getPath() throws IOException {
-        if (path != null) {
-            return path;
-        }
-        String host = url.getHost();
-        if (host == null || host.isEmpty() || "localhost".equalsIgnoreCase(host)) {
-            path = url.getFile();
-            try {
-                path = ParseUtil.decode(path);
-            } catch (IllegalArgumentException iae) {
-                throw new IOException(iae);
+
+    public String getPath() {
+        if (path == null) {
+            String host = url.getHost();
+            if (host == null || host.isEmpty() || "localhost".equalsIgnoreCase(host)) {
+                path = ParseUtil.decode(url.getFile());
             }
         }
         return path;
@@ -74,13 +68,12 @@ final class FileURLMapper {
     /**
      * Checks whether the file identified by the URL exists.
      */
-    boolean exists() throws IOException {
-        String s = getPath();
-        if (s == null) {
-            return false;
-        } else {
-            File f = new File(s);
-            return f.exists();
-        }
+
+    public boolean exists() {
+        String filePath = getPath();
+        return filePath != null && new File(filePath).exists();
     }
 }
+
+
+
