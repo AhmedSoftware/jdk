@@ -100,7 +100,9 @@ final class PublicMethods {
         static boolean matches(Method method,
                                String name, // may not be interned
                                Class<?>[] ptypes) {
-            return method.getName().equals(name) &&
+            // check for matching param types length, then name, then param type equality
+            return method.getParameterCount() == ptypes.length &&
+                   method.getName().equals(name) &&
                    Arrays.equals(
                        reflectionFactory.getExecutableSharedParameterTypes(method),
                        ptypes
