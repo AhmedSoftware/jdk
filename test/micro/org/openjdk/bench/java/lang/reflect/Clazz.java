@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,6 +51,29 @@ public class Clazz {
     public Constructor getConstructor() throws NoSuchMethodException {
         return Clazz.class.getConstructor();
     }
+
+    /**
+     * Get modifiers for this class through reflection
+     *
+     * @return
+     * @throws NoSuchMethodException
+     */
+    @Benchmark
+    public int getModifiers() throws NoSuchMethodException {
+        return Clazz.class.getModifiers();
+    }
+
+    /**
+     * Get modifiers for an primitive array class through reflection
+     *
+     * @return
+     * @throws NoSuchMethodException
+     */
+    @Benchmark
+    public int getArrayModifiers() throws NoSuchMethodException {
+        return int[].class.getModifiers();
+    }
+
 
     /**
      * Get constructor for the String class through reflection, forcing full

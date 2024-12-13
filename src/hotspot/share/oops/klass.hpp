@@ -120,9 +120,6 @@ class Klass : public Metadata {
   //  - Various type checking in the JVM
   const KlassKind _kind;
 
-  // Processed access flags, for use by Class.getModifiers.
-  jint        _modifier_flags;
-
   // The fields _super_check_offset, _secondary_super_cache, _secondary_supers
   // and _primary_supers all help make fast subtype checks.  See big discussion
   // in doc/server_compiler/checktype.txt
@@ -291,10 +288,6 @@ protected:
   // This leaves the OopHandle in the CLD, but that's ok, you can't release them.
   void clear_java_mirror_handle() { _java_mirror = OopHandle(); }
 
-  // modifier flags
-  jint modifier_flags() const          { return _modifier_flags; }
-  void set_modifier_flags(jint flags)  { _modifier_flags = flags; }
-
   // size helper
   int layout_helper() const            { return _layout_helper; }
   void set_layout_helper(int lh)       { _layout_helper = lh; }
@@ -447,7 +440,6 @@ protected:
   static ByteSize secondary_supers_offset()      { return byte_offset_of(Klass, _secondary_supers); }
   static ByteSize java_mirror_offset()           { return byte_offset_of(Klass, _java_mirror); }
   static ByteSize class_loader_data_offset()     { return byte_offset_of(Klass, _class_loader_data); }
-  static ByteSize modifier_flags_offset()        { return byte_offset_of(Klass, _modifier_flags); }
   static ByteSize layout_helper_offset()         { return byte_offset_of(Klass, _layout_helper); }
   static ByteSize access_flags_offset()          { return byte_offset_of(Klass, _access_flags); }
 #if INCLUDE_JVMCI

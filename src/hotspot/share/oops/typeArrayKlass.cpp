@@ -66,6 +66,10 @@ TypeArrayKlass* TypeArrayKlass::create_klass(BasicType type,
   return ak;
 }
 
+jint TypeArrayKlass::compute_modifier_flags() const {
+  return JVM_ACC_ABSTRACT | JVM_ACC_FINAL | JVM_ACC_PUBLIC;
+}
+
 TypeArrayKlass* TypeArrayKlass::allocate(ClassLoaderData* loader_data, BasicType type, Symbol* name, TRAPS) {
   assert(TypeArrayKlass::header_size() <= InstanceKlass::header_size(),
       "array klasses must be same size as InstanceKlass");

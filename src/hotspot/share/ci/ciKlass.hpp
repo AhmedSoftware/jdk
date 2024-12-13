@@ -122,9 +122,6 @@ public:
   // Get the instance of java.lang.Class corresponding to this klass.
   ciInstance*            java_mirror();
 
-  // Fetch Klass::modifier_flags.
-  jint                   modifier_flags();
-
   // Fetch Klass::access_flags.
   jint                   access_flags();
 
