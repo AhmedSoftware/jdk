@@ -30,7 +30,7 @@
 #include "code/exceptionHandlerTable.hpp"
 #include "code/nmethod.hpp"
 #include "compiler/compilationFailureInfo.hpp"
-#include "compiler/compilationMemoryStatistic.hpp"
+#include "compiler/compilationMemoryStatistic.inline.hpp"
 #include "compiler/compileBroker.hpp"
 #include "compiler/compileLog.hpp"
 #include "compiler/compilerOracle.hpp"
@@ -42,6 +42,7 @@
 #include "jfr/jfrEvents.hpp"
 #include "jvm_io.h"
 #include "memory/allocation.hpp"
+#include "memory/arena.hpp"
 #include "memory/resourceArea.hpp"
 #include "opto/addnode.hpp"
 #include "opto/block.hpp"
@@ -636,7 +637,7 @@ Compile::Compile( ciEnv* ci_env, ciMethod* target, int osr_bci,
                   _has_method_handle_invokes(false),
                   _clinit_barrier_on_entry(false),
                   _stress_seed(0),
-                  _comp_arena(mtCompiler),
+                  _comp_arena(mtCompiler, Arena::Tag::tag_comp),
                   _barrier_set_state(BarrierSet::barrier_set()->barrier_set_c2()->create_barrier_state(comp_arena())),
                   _env(ci_env),
                   _directive(directive),
@@ -916,7 +917,7 @@ Compile::Compile( ciEnv* ci_env,
     _has_method_handle_invokes(false),
     _clinit_barrier_on_entry(false),
     _stress_seed(0),
-    _comp_arena(mtCompiler),
+    _comp_arena(mtCompiler, Arena::Tag::tag_comp),
     _barrier_set_state(BarrierSet::barrier_set()->barrier_set_c2()->create_barrier_state(comp_arena())),
     _env(ci_env),
     _directive(directive),
@@ -3034,6 +3035,20 @@ void Compile::Code_Gen() {
     print_method(PHASE_FINAL_CODE, 1); // Compile::_output is not null here
   }
 
+#ifdef ASSERT
+  {
+    // Don't mind me, just testing the compiler memory statistic
+    TracePhase tp(_t_testTimer);
+    // We allocate some RA, then release part of it. Note that to make a blip on the radar, sizes
+    // must be large enough to force a new arena chunk to be allocated.
+    NEW_RESOURCE_ARRAY(char, Chunk::max_default_size * 3);
+    {
+      ResourceMark rm;
+      NEW_RESOURCE_ARRAY(char, Chunk::max_default_size * 3);
+    }
+  }
+#endif
+
   // He's dead, Jim.
   _cfg     = (PhaseCFG*)((intptr_t)0xdeadbeef);
   _regalloc = (PhaseChaitin*)((intptr_t)0xdeadbeef);
@@ -4320,7 +4335,8 @@ Compile::TracePhase::TracePhase(const char* name, PhaseTraceId id)
   : TraceTime(name, &Phase::timers[id], CITime, CITimeVerbose),
     _compile(Compile::current()),
     _log(nullptr),
-    _dolog(CITimeVerbose)
+    _dolog(CITimeVerbose),
+    _id(id)
 {
   assert(_compile != nullptr, "sanity check");
   if (_dolog) {
@@ -4331,12 +4347,19 @@ Compile::TracePhase::TracePhase(const char* name, PhaseTraceId id)
     _log->stamp();
     _log->end_head();
   }
+
+  // Inform memory statistic, if enabled
+  CompilationMemoryStatistic::on_c2_phase_start(_id);
 }
 
 Compile::TracePhase::TracePhase(PhaseTraceId id)
   : TracePhase(Phase::get_phase_trace_id_text(id), id) {}
 
 Compile::TracePhase::~TracePhase() {
+
+  // Inform memory statistic, if enabled
+  CompilationMemoryStatistic::on_c2_phase_end();
+
   if (_compile->failing_internal()) {
     if (_log != nullptr) {
       _log->done("phase");
