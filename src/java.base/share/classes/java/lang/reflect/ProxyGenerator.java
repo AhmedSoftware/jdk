@@ -202,7 +202,6 @@ final class ProxyGenerator {
      * @param interfaces  proxy interfaces
      * @param accessFlags access flags of the proxy class
      */
-    @SuppressWarnings("removal")
     static byte[] generateProxyClass(ClassLoader loader,
                                      final String name,
                                      List<Class<?>> interfaces,

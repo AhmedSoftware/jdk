@@ -1227,7 +1227,6 @@ public final class LdapCtx extends ComponentDirContext
 
             // process the referrals sequentially
             while (true) {
-                @SuppressWarnings("unchecked")
                 LdapReferralContext refCtx =
                     (LdapReferralContext)e.getReferralContext(envprops, bindCtls);
 
@@ -1886,7 +1885,6 @@ public final class LdapCtx extends ComponentDirContext
             // process the referrals sequentially
             while (true) {
 
-                @SuppressWarnings("unchecked")
                 LdapReferralContext refCtx = (LdapReferralContext)
                         e.getReferralContext(envprops, bindCtls);
 

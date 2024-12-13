@@ -231,7 +231,7 @@ public final class Method extends Executable {
      * @jls 8.4.4 Generic Methods
      */
     @Override
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings("unchecked")
     public TypeVariable<Method>[] getTypeParameters() {
         if (getGenericSignature() != null)
             return (TypeVariable<Method>[])getGenericInfo().getTypeParameters();

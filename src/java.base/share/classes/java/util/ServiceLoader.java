@@ -726,7 +726,7 @@ public final class ServiceLoader<S>
 
         @Override
         public boolean equals(Object ob) {
-            return ob instanceof @SuppressWarnings("unchecked")ProviderImpl<?> that
+            return ob instanceof ProviderImpl<?> that
                     && this.service == that.service
                     && this.type == that.type;
         }
