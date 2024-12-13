@@ -53,6 +53,7 @@ class Block;
 class Bundle;
 class CallGenerator;
 class CallStaticJavaNode;
+class CastIINode;
 class CloneMap;
 class CompilationFailureInfo;
 class ConnectionGraph;
