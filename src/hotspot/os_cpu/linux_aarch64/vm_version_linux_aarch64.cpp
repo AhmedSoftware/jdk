@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2024, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -181,7 +181,7 @@ void VM_Version::get_os_cpu_info() {
 }
 
 static bool read_fully(const char *fname, char *buf, size_t buflen) {
-  assert(buf != nullptr, "invalid argument");
+  guarantee(buf != nullptr, "buf should not be nullptr");  // Use guarantee to suppress gcc warnings
   assert(buflen >= 1, "invalid argument");
   int fd = os::open(fname, O_RDONLY, 0);
   if (fd != -1) {
