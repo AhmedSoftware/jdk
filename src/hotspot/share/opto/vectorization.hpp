@@ -28,6 +28,7 @@
 #include "opto/matcher.hpp"
 #include "opto/loopnode.hpp"
 #include "opto/traceAutoVectorizationTag.hpp"
+#include "opto/mempointer.hpp"
 #include "utilities/pair.hpp"
 
 // Code in this file and the vectorization.cpp contains shared logics and
@@ -85,6 +86,7 @@ private:
   CountedLoopEndNode* _pre_loop_end; // cache access to pre-loop for main loops only
 
   NOT_PRODUCT(VTrace _vtrace;)
+  NOT_PRODUCT(TraceMemPointer _mptrace; )
 
   static constexpr char const* FAILURE_ALREADY_VECTORIZED = "loop already vectorized";
   static constexpr char const* FAILURE_UNROLL_ONLY        = "loop only wants to be unrolled";
@@ -102,7 +104,18 @@ public:
     _cl        (nullptr),
     _cl_exit   (nullptr),
     _iv        (nullptr),
-    _pre_loop_end (nullptr) {}
+    _pre_loop_end (nullptr)
+#ifndef PRODUCT
+    COMMA
+    _mptrace(TraceMemPointer(
+      _vtrace.is_trace(TraceAutoVectorizationTag::POINTER_PARSING),
+      _vtrace.is_trace(TraceAutoVectorizationTag::POINTER_ALIASING),
+      _vtrace.is_trace(TraceAutoVectorizationTag::POINTER_ADJACENCY),
+      _vtrace.is_trace(TraceAutoVectorizationTag::POINTER_OVERLAP)
+    ))
+#endif
+    {}
+
   NONCOPYABLE(VLoop);
 
   IdealLoopTree* lpt()        const { return _lpt; };
@@ -133,7 +146,8 @@ public:
   static bool vectors_should_be_aligned() { return !Matcher::misaligned_vectors_ok() || AlignVector; }
 
 #ifndef PRODUCT
-  const VTrace& vtrace()      const { return _vtrace; }
+  const VTrace& vtrace()           const { return _vtrace; }
+  const TraceMemPointer& mptrace() const { return _mptrace; }
 
   bool is_trace_preconditions() const {
     return _vtrace.is_trace(TraceAutoVectorizationTag::PRECONDITIONS);
@@ -162,10 +176,6 @@ public:
   bool is_trace_vpointers() const {
     return _vtrace.is_trace(TraceAutoVectorizationTag::POINTERS);
   }
-
-  bool is_trace_pointer_analysis() const {
-    return _vtrace.is_trace(TraceAutoVectorizationTag::POINTER_ANALYSIS);
-  }
 #endif
 
   // Is the node in the basic block of the loop?
@@ -173,6 +183,27 @@ public:
   bool in_bb(const Node* n) const {
     const Node* ctrl = _phase->has_ctrl(n) ? _phase->get_ctrl(n) : n;
     return n != nullptr && n->outcnt() > 0 && ctrl == _cl;
+  }
+
+  // Some nodes must be pre-loop invariant, so that they can be used for conditions
+  // before or inside the pre-loop. For example, alignment of main-loop vector
+  // memops must be acheived in the pre-loop, via the exit check in the pre-loop.
+  bool is_pre_loop_invariant(Node* n) const {
+    // Must be in the main-loop, otherwise we can't access the pre-loop.
+    // This fails during SuperWord::unrolling_analysis, but that is ok.
+    if (!cl()->is_main_loop()) {
+      return false;
+    }
+
+    Node* ctrl = phase()->get_ctrl(n);
+
+    // Quick test: is it in the main-loop?
+    if (lpt()->is_member(phase()->get_loop(ctrl))) {
+      return false;
+    }
+
+    // Is it before the pre-loop?
+    return phase()->is_dominator(ctrl, pre_loop_head());
   }
 
   // Check if the loop passes some basic preconditions for vectorization.
@@ -427,7 +458,7 @@ public:
     return velt_type(n)->array_element_basic_type();
   }
 
-  int data_size(Node* s) const {
+  int data_size(const Node* s) const {
     int bsize = type2aelembytes(velt_basic_type(s));
     assert(bsize != 0, "valid size");
     return bsize;
@@ -667,288 +698,252 @@ private:
   VStatus setup_submodules_helper();
 };
 
-// A vectorization pointer (VPointer) has information about an address for
-// dependence checking and vector alignment. It's usually bound to a memory
-// operation in a counted loop for vectorizable analysis.
+// VPointer wraps the MemPointer to the use in a loop:
 //
-// We parse and represent pointers of the simple form:
+//   pointer = SUM(summands) + con
 //
-//   pointer   = adr + offset + invar + scale * ConvI2L(iv)
+// We define invar_summands as all summands, except those where the variable is
+// the base or the loop iv. We can thus write:
 //
-// Where:
+//   pointer = base + invar + iv_scale * iv + con
 //
-//   adr: the base address of an array (base = adr)
-//        OR
-//        some address to off-heap memory (base = TOP)
+//   invar = SUM(invar_summands)
 //
-//   offset: a constant offset
-//   invar:  a runtime variable, which is invariant during the loop
-//   scale:  scaling factor
-//   iv:     loop induction variable
-//
-// But more precisely, we parse the composite-long-int form:
-//
-//   pointer   = adr + long_offset + long_invar + long_scale * ConvI2L(int_offset + inv_invar + int_scale * iv)
-//
-//   pointer   = adr + long_offset + long_invar + long_scale * ConvI2L(int_index)
-//   int_index =       int_offset  + int_invar  + int_scale  * iv
-//
-// However, for aliasing and adjacency checks (e.g. VPointer::cmp()) we always use the simple form to make
-// decisions. Hence, we must make sure to only create a "valid" VPointer if the optimisations based on the
-// simple form produce the same result as the compound-long-int form would. Intuitively, this depends on
-// if the int_index overflows, but the precise conditions are given in VPointer::is_safe_to_use_as_simple_form().
-//
-//   ConvI2L(int_index) = ConvI2L(int_offset  + int_invar  + int_scale  * iv)
-//                      = Convi2L(int_offset) + ConvI2L(int_invar) + ConvI2L(int_scale) * ConvI2L(iv)
-//
-//   scale  = long_scale * ConvI2L(int_scale)
-//   offset = long_offset + long_scale * ConvI2L(int_offset)
-//   invar  = long_invar  + long_scale * ConvI2L(int_invar)
-//
-//   pointer   = adr + offset + invar + scale * ConvI2L(iv)
+// We have the following components:
+//   - base:
+//       on-heap (object base) or off-heap (native base address)
+//   - invar_summands:
+//       pre-loop invariant. This is important when we need to memory align a
+//       pointer using the pre-loop limit.
+//   - iv and iv_scale:
+//       If we find a summand where the variable is the iv, we set iv_scale to the
+//       corresponding scale. If there is no such summand, then we know that the
+//       pointer does not depend on the iv, since otherwise there would have to be
+//       a summand where its variable it main-loop variant.
 //
 class VPointer : public ArenaObj {
- protected:
-  MemNode* const  _mem;      // My memory reference node
-  const VLoop&    _vloop;
+private:
+  const VLoop& _vloop;
+  const MemPointer _mem_pointer;
 
-  // Components of the simple form:
-  Node* _base;               // Base address of an array OR null if some off-heap memory.
-  Node* _adr;                // Same as _base if an array pointer OR some off-heap memory pointer.
-  int   _scale;              // multiplier for iv (in bytes), 0 if no loop iv
-  int   _offset;             // constant offset (in bytes)
+  // Derived, for quicker use.
+  const jint  _iv_scale;
 
-  Node* _invar;              // invariant offset (in bytes), null if none
-#ifdef ASSERT
-  Node* _debug_invar;
-  bool  _debug_negate_invar; // if true then use: (0 - _invar)
-  Node* _debug_invar_scale;  // multiplier for invariant
-#endif
+  const bool _is_valid;
 
-  // The int_index components of the compound-long-int form. Used to decide if it is safe to use the
-  // simple form rather than the compound-long-int form that was parsed.
-  bool  _has_int_index_after_convI2L;
-  int   _int_index_after_convI2L_offset;
-  Node* _int_index_after_convI2L_invar;
-  int   _int_index_after_convI2L_scale;
+  VPointer(const VLoop& vloop,
+           const MemPointer& mem_pointer,
+           const bool must_be_invalid = false) :
+    _vloop(vloop),
+    _mem_pointer(mem_pointer),
+    _iv_scale(init_iv_scale()),
+    _is_valid(!must_be_invalid && init_is_valid()) {}
 
-  Node_Stack* _nstack;       // stack used to record a vpointer trace of variants
-  bool        _analyze_only; // Used in loop unrolling only for vpointer trace
-  uint        _stack_idx;    // Used in loop unrolling only for vpointer trace
-
-  PhaseIdealLoop* phase() const { return _vloop.phase(); }
-  IdealLoopTree*  lpt() const   { return _vloop.lpt(); }
-  PhiNode*        iv() const    { return _vloop.iv(); }
-
-  bool is_loop_member(Node* n) const;
-  bool invariant(Node* n) const;
-
-  // Match: k*iv + offset
-  bool scaled_iv_plus_offset(Node* n);
-  // Match: k*iv where k is a constant that's not zero
-  bool scaled_iv(Node* n);
-  // Match: offset is (k [+/- invariant])
-  bool offset_plus_k(Node* n, bool negate = false);
-
- public:
-  enum CMP {
-    Less          = 1,
-    Greater       = 2,
-    Equal         = 4,
-    NotEqual      = (Less | Greater),
-    NotComparable = (Less | Greater | Equal)
-  };
-
-  VPointer(MemNode* const mem, const VLoop& vloop) :
-    VPointer(mem, vloop, nullptr, false) {}
-  VPointer(MemNode* const mem, const VLoop& vloop, Node_Stack* nstack) :
-    VPointer(mem, vloop, nstack, true) {}
- private:
-  VPointer(MemNode* const mem, const VLoop& vloop,
-           Node_Stack* nstack, bool analyze_only);
-  // Following is used to create a temporary object during
-  // the pattern match of an address expression.
-  VPointer(VPointer* p);
-  NONCOPYABLE(VPointer);
-
-  bool is_safe_to_use_as_simple_form(Node* base, Node* adr) const;
-
- public:
-  bool valid()             const { return _adr != nullptr; }
-  bool has_iv()            const { return _scale != 0; }
-
-  Node* base()             const { return _base; }
-  Node* adr()              const { return _adr; }
-  MemNode* mem()           const { return _mem; }
-  int   scale_in_bytes()   const { return _scale; }
-  Node* invar()            const { return _invar; }
-  int   offset_in_bytes()  const { return _offset; }
-  int   memory_size()      const { return _mem->memory_size(); }
-  Node_Stack* node_stack() const { return _nstack; }
-
-  // Biggest detectable factor of the invariant.
-  int   invar_factor() const;
-
-  // Comparable?
-  bool invar_equals(const VPointer& q) const {
-    assert(_debug_invar == NodeSentinel || q._debug_invar == NodeSentinel ||
-           (_invar == q._invar) == (_debug_invar == q._debug_invar &&
-                                    _debug_invar_scale == q._debug_invar_scale &&
-                                    _debug_negate_invar == q._debug_negate_invar), "");
-    return _invar == q._invar;
-  }
-
-  // We compute if and how two VPointers can alias at runtime, i.e. if the two addressed regions of memory can
-  // ever overlap. There are essentially 3 relevant return states:
-  //  - NotComparable:  Synonymous to "unknown aliasing".
-  //                    We have no information about how the two VPointers can alias. They could overlap, refer
-  //                    to another location in the same memory object, or point to a completely different object.
-  //                    -> Memory edge required. Aliasing unlikely but possible.
-  //
-  //  - Less / Greater: Synonymous to "never aliasing".
-  //                    The two VPointers may point into the same memory object, but be non-aliasing (i.e. we
-  //                    know both address regions inside the same memory object, but these regions are non-
-  //                    overlapping), or the VPointers point to entirely different objects.
-  //                    -> No memory edge required. Aliasing impossible.
-  //
-  //  - Equal:          Synonymous to "overlap, or point to different memory objects".
-  //                    The two VPointers either overlap on the same memory object, or point to two different
-  //                    memory objects.
-  //                    -> Memory edge required. Aliasing likely.
-  //
-  // In a future refactoring, we can simplify to two states:
-  //  - NeverAlias:     instead of Less / Greater
-  //  - MayAlias:       instead of Equal / NotComparable
-  //
-  // Two VPointer are "comparable" (Less / Greater / Equal), iff all of these conditions apply:
-  //   1) Both are valid, i.e. expressible in the compound-long-int or simple form.
-  //   2) The adr are identical, or both are array bases of different arrays.
-  //   3) They have identical scale.
-  //   4) They have identical invar.
-  //   5) The difference in offsets is limited: abs(offset0 - offset1) < 2^31.
-  int cmp(const VPointer& q) const {
-    if (valid() && q.valid() &&
-        (_adr == q._adr || (_base == _adr && q._base == q._adr)) &&
-        _scale == q._scale   && invar_equals(q)) {
-      jlong difference = abs(java_subtract((jlong)_offset, (jlong)q._offset));
-      jlong max_diff = (jlong)1 << 31;
-      if (difference >= max_diff) {
-        return NotComparable;
-      }
-      bool overlap = q._offset <   _offset +   memory_size() &&
-                       _offset < q._offset + q.memory_size();
-      return overlap ? Equal : (_offset < q._offset ? Less : Greater);
-    } else {
-      return NotComparable;
-    }
-  }
-
-  bool overlap_possible_with_any_in(const GrowableArray<Node*>& nodes) const {
-    for (int i = 0; i < nodes.length(); i++) {
-      MemNode* mem = nodes.at(i)->as_Mem();
-      VPointer p_mem(mem, _vloop);
-      // Only if we know that we have Less or Greater can we
-      // be sure that there can never be an overlap between
-      // the two memory regions.
-      if (!not_equal(p_mem)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool not_equal(const VPointer& q)  const { return not_equal(cmp(q)); }
-  bool equal(const VPointer& q)      const { return equal(cmp(q)); }
-  bool comparable(const VPointer& q) const { return comparable(cmp(q)); }
-  static bool not_equal(int cmp)  { return cmp <= NotEqual; }
-  static bool equal(int cmp)      { return cmp == Equal; }
-  static bool comparable(int cmp) { return cmp < NotComparable; }
-
-  // We need to be able to sort the VPointer to efficiently group the
-  // memops into groups, and to find adjacent memops.
-  static int cmp_for_sort_by_group(const VPointer** p1, const VPointer** p2);
-  static int cmp_for_sort(const VPointer** p1, const VPointer** p2);
-
-  NOT_PRODUCT( void print() const; )
-  NOT_PRODUCT( static void print_con_or_idx(const Node* n); )
-
+public:
+  VPointer(const MemNode* mem,
+           const VLoop& vloop,
+           MemPointerParserCallback& callback = MemPointerParserCallback::empty()) :
+    VPointer(vloop,
+             MemPointer(NOT_PRODUCT(vloop.mptrace() COMMA)
+                        mem,
+                        callback))
+  {
 #ifndef PRODUCT
-  class Tracer {
-    friend class VPointer;
-    bool _is_trace_alignment;
-    static int _depth;
-    int _depth_save;
-    void print_depth() const;
-    int  depth() const    { return _depth; }
-    void set_depth(int d) { _depth = d; }
-    void inc_depth()      { _depth++; }
-    void dec_depth()      { if (_depth > 0) _depth--; }
-    void store_depth()    { _depth_save = _depth; }
-    void restore_depth()  { _depth = _depth_save; }
-
-    class Depth {
-      friend class VPointer;
-      Depth()      { ++_depth; }
-      Depth(int x) { _depth = 0; }
-      ~Depth()     { if (_depth > 0) --_depth; }
-    };
-    Tracer(bool is_trace_alignment) : _is_trace_alignment(is_trace_alignment) {}
-
-    // tracing functions
-    void ctor_1(const Node* mem);
-    void ctor_2(Node* adr);
-    void ctor_3(Node* adr, int i);
-    void ctor_4(Node* adr, int i);
-    void ctor_5(Node* adr, Node* base,  int i);
-    void ctor_6(const Node* mem);
-
-    void scaled_iv_plus_offset_1(Node* n);
-    void scaled_iv_plus_offset_2(Node* n);
-    void scaled_iv_plus_offset_3(Node* n);
-    void scaled_iv_plus_offset_4(Node* n);
-    void scaled_iv_plus_offset_5(Node* n);
-    void scaled_iv_plus_offset_6(Node* n);
-    void scaled_iv_plus_offset_7(Node* n);
-    void scaled_iv_plus_offset_8(Node* n);
-
-    void scaled_iv_1(Node* n);
-    void scaled_iv_2(Node* n, int scale);
-    void scaled_iv_3(Node* n, int scale);
-    void scaled_iv_4(Node* n, int scale);
-    void scaled_iv_5(Node* n, int scale);
-    void scaled_iv_6(Node* n, int scale);
-    void scaled_iv_7(Node* n);
-    void scaled_iv_8(Node* n, VPointer* tmp);
-    void scaled_iv_9(Node* n, int _scale, int _offset, Node* _invar);
-    void scaled_iv_10(Node* n);
-
-    void offset_plus_k_1(Node* n);
-    void offset_plus_k_2(Node* n, int _offset);
-    void offset_plus_k_3(Node* n, int _offset);
-    void offset_plus_k_4(Node* n);
-    void offset_plus_k_5(Node* n, Node* _invar);
-    void offset_plus_k_6(Node* n, Node* _invar, bool _negate_invar, int _offset);
-    void offset_plus_k_7(Node* n, Node* _invar, bool _negate_invar, int _offset);
-    void offset_plus_k_8(Node* n, Node* _invar, bool _negate_invar, int _offset);
-    void offset_plus_k_9(Node* n, Node* _invar, bool _negate_invar, int _offset);
-    void offset_plus_k_10(Node* n, Node* _invar, bool _negate_invar, int _offset);
-    void offset_plus_k_11(Node* n);
-  } _tracer; // Tracer
+    if (vloop.mptrace().is_trace_parsing()) {
+      tty->print_cr("VPointer::VPointer:");
+      tty->print("mem: "); mem->dump();
+      print_on(tty);
+    }
 #endif
+  }
 
-  Node* maybe_negate_invar(bool negate, Node* invar);
+  VPointer make_with_size(const jint new_size) const {
+    const VPointer p(_vloop, mem_pointer().make_with_size(new_size));
+#ifndef PRODUCT
+    if (_vloop.mptrace().is_trace_parsing()) {
+      tty->print_cr("VPointer::make_with_size:");
+      tty->print("  old: "); print_on(tty);
+      tty->print("  new: "); p.print_on(tty);
+    }
+#endif
+    return p;
+  }
 
-  void maybe_add_to_invar(Node* new_invar, bool negate);
+  // old_pointer = base + invar + iv_scale *  iv              + con
+  // new_pointer = base + invar + iv_scale * (iv + iv_offset) + con
+  //             = base + invar + iv_scale * iv               + (con + iv_scale * iv_offset)
+  VPointer make_with_iv_offset(const jint iv_offset) const {
+    NoOverflowInt new_con = NoOverflowInt(con()) + NoOverflowInt(iv_scale()) * NoOverflowInt(iv_offset);
+    if (new_con.is_NaN()) {
+#ifndef PRODUCT
+      if (_vloop.mptrace().is_trace_parsing()) {
+        tty->print_cr("VPointer::make_with_iv_offset:");
+        tty->print("  old: "); print_on(tty);
+        tty->print_cr("  new con overflow (iv_offset: %d) -> invalid VPointer.", iv_offset);
+      }
+#endif
+      return make_invalid();
+    }
+    const VPointer p(_vloop, mem_pointer().make_with_con(new_con));
+#ifndef PRODUCT
+    if (_vloop.mptrace().is_trace_parsing()) {
+      tty->print_cr("VPointer::make_with_iv_offset:");
+      tty->print("  old: "); print_on(tty);
+      tty->print("  new: "); p.print_on(tty);
+    }
+#endif
+    return p;
+  }
 
-  static bool try_AddI_no_overflow(int offset1, int offset2, int& result);
-  static bool try_SubI_no_overflow(int offset1, int offset2, int& result);
-  static bool try_AddSubI_no_overflow(int offset1, int offset2, bool is_sub, int& result);
-  static bool try_LShiftI_no_overflow(int offset1, int offset2, int& result);
-  static bool try_MulI_no_overflow(int offset1, int offset2, int& result);
+  VPointer make_invalid() const {
+    return VPointer(_vloop, mem_pointer(), true /* must be invalid*/);
+  }
 
-  Node* register_if_new(Node* n) const;
+  // Accessors
+  bool is_valid()                 const { return _is_valid; }
+  const MemPointer& mem_pointer() const { assert(_is_valid, ""); return _mem_pointer; }
+  jint size()                     const { assert(_is_valid, ""); return mem_pointer().size(); }
+  jint iv_scale()                 const { assert(_is_valid, ""); return _iv_scale; }
+  jint con()                      const { return mem_pointer().con().value(); }
+
+  template<typename Callback>
+  void for_each_invar_summand(Callback callback) const {
+    mem_pointer().for_each_non_empty_summand([&] (const MemPointerSummand& s) {
+      Node* variable = s.variable();
+      if (variable != mem_pointer().base().object_or_native() &&
+          _vloop.is_pre_loop_invariant(variable)) {
+        callback(s);
+      }
+    });
+  }
+
+  // Greatest common factor among the scales of the invar_summands.
+  // Out of simplicity, we only factor out positive powers-of-2,
+  // between 1 and ObjectAlignmentInBytes. If the invar is empty,
+  // i.e. there is no summand in invar_summands, we return 0.
+  jint compute_invar_factor() const {
+    jint factor = ObjectAlignmentInBytes;
+    int invar_count = 0;
+    for_each_invar_summand([&] (const MemPointerSummand& s) {
+      invar_count++;
+      while (!s.scale().is_multiple_of(NoOverflowInt(factor))) {
+        factor = factor / 2;
+      }
+    });
+    return invar_count > 0 ? factor : 0;
+  }
+
+  int count_invar_summands() const {
+    int invar_count = 0;
+    for_each_invar_summand([&] (const MemPointerSummand& s) {
+      invar_count++;
+    });
+    return invar_count;
+  }
+
+  bool has_same_invar_and_iv_scale_as(const VPointer& other) const {
+    // If we have the same invar_summands, and the same iv summand with the same iv_scale,
+    // then all summands except the base must be the same.
+    return mem_pointer().has_same_non_base_summands_as(other.mem_pointer());
+  }
+
+  bool is_adjacent_to_and_before(const VPointer& other) const {
+    if (!is_valid() || !other.is_valid()) {
+#ifndef PRODUCT
+      if (_vloop.mptrace().is_trace_overlap()) {
+        tty->print_cr("VPointer::is_adjacent_to_and_before: invalid VPointer, adjacency unknown.");
+      }
+#endif
+      return false;
+    }
+    return mem_pointer().is_adjacent_to_and_before(other.mem_pointer());
+  }
+
+  bool never_overlaps_with(const VPointer& other) const {
+    if (!is_valid() || !other.is_valid()) {
+#ifndef PRODUCT
+      if (_vloop.mptrace().is_trace_overlap()) {
+        tty->print_cr("VPointer::never_overlaps_with: invalid VPointer, overlap unknown.");
+      }
+#endif
+      return false;
+    }
+    return mem_pointer().never_overlaps_with(other.mem_pointer());
+  }
+
+  NOT_PRODUCT( void print_on(outputStream* st, bool end_with_cr = true) const; )
+
+private:
+  jint init_iv_scale() const {
+    for (uint i = 0; i < MemPointer::SUMMANDS_SIZE; i++) {
+      const MemPointerSummand& summand = _mem_pointer.summands_at(i);
+      Node* variable = summand.variable();
+      if (variable == _vloop.iv()) {
+        return summand.scale().value();
+      }
+    }
+    // No summand with variable == iv.
+    return 0;
+  }
+
+  // Check that all variables are either the iv, or else invariants.
+  bool init_is_valid() const {
+    if (!_mem_pointer.base().is_known()) {
+      // VPointer needs to know if it is native (off-heap) or object (on-heap).
+      // We may for example have failed to fully decompose the MemPointer, possibly
+      // because such a decomposition is not considered safe.
+#ifndef PRODUCT
+      if (_vloop.mptrace().is_trace_parsing()) {
+        tty->print_cr("VPointer::init_is_valid: base not known.");
+      }
+#endif
+      return false;
+    }
+
+    // All summands, except the iv-summand must be pre-loop invariant. This is necessary
+    // so that we can use the variables in checks inside or before the pre-loop, e.g. for
+    // alignment.
+    for (uint i = 0; i < MemPointer::SUMMANDS_SIZE; i++) {
+      const MemPointerSummand& summand = _mem_pointer.summands_at(i);
+      Node* variable = summand.variable();
+      if (variable != nullptr && variable != _vloop.iv() && !_vloop.is_pre_loop_invariant(variable)) {
+#ifndef PRODUCT
+        if (_vloop.mptrace().is_trace_parsing()) {
+          tty->print("VPointer::init_is_valid: summand is not pre-loop invariant: ");
+          summand.print_on(tty);
+          tty->cr();
+        }
+#endif
+        return false;
+      }
+    }
+
+    // In the pointer analysis, and especially the AlignVector, analysis we assume that
+    // stride and scale are not too large. For example, we multiply "iv_scale * iv_stride",
+    // and assume that this does not overflow the int range. We also take "abs(iv_scale)"
+    // and "abs(iv_stride)", which would overflow for min_int = -(2^31). Still, we want
+    // to at least allow small and moderately large stride and scale. Therefore, we
+    // allow values up to 2^30, which is only a factor 2 smaller than the max/min int.
+    // Normal performance relevant code will have much lower values. And the restriction
+    // allows us to keep the rest of the autovectorization code much simpler, since we
+    // do not have to deal with overflows.
+    jlong long_iv_scale  = _iv_scale;
+    jlong long_iv_stride = _vloop.iv_stride();
+    jlong max_val = 1 << 30;
+    if (abs(long_iv_scale) >= max_val ||
+        abs(long_iv_stride) >= max_val ||
+        abs(long_iv_scale * long_iv_stride) >= max_val) {
+#ifndef PRODUCT
+      if (_vloop.mptrace().is_trace_parsing()) {
+        tty->print_cr("VPointer::init_is_valid: scale or stride too large.");
+      }
+#endif
+      return false;
+    }
+
+    return true;
+  }
 };
-
 
 // Vector element size statistics for loop vectorization with vector masks
 class VectorElementSizeStats {
@@ -998,9 +993,9 @@ class VectorElementSizeStats {
 // When alignment is required, we must adjust the pre-loop iteration count pre_iter,
 // such that the address is aligned for any main_iter >= 0:
 //
-//   adr = base + offset + invar + scale * init
-//                               + scale * pre_stride * pre_iter
-//                               + scale * main_stride * main_iter
+//   adr = base + invar + iv_scale * init                      + con
+//                      + iv_scale * pre_stride * pre_iter
+//                      + iv_scale * main_stride * main_iter
 //
 // The AlignmentSolver generates solutions of the following forms:
 //   1. Empty:       No pre_iter guarantees alignment.
@@ -1009,9 +1004,9 @@ class VectorElementSizeStats {
 //
 // The Constrained solution is of the following form:
 //
-//   pre_iter = m * q + r                                    (for any integer m)
-//                   [- invar / (scale * pre_stride)  ]      (if there is an invariant)
-//                   [- init / pre_stride             ]      (if init is variable)
+//   pre_iter = m * q + r                                       (for any integer m)
+//                   [- invar / (iv_scale * pre_stride)  ]      (if there is an invariant)
+//                   [- init / pre_stride                ]      (if init is variable)
 //
 // The solution is periodic with periodicity q, which is guaranteed to be a power of 2.
 // This periodic solution is "rotated" by three alignment terms: one for constants (r),
@@ -1104,19 +1099,18 @@ private:
   const MemNode* _mem_ref;
   const int _q;
   const int _r;
-  const Node* _invar;
-  const int _scale;
+  // Use VPointer for invar and iv_scale
+  const VPointer& _vpointer;
 public:
   ConstrainedAlignmentSolution(const MemNode* mem_ref,
                                const int q,
                                const int r,
-                               const Node* invar,
-                               int scale) :
+                               const VPointer& vpointer) :
       _mem_ref(mem_ref),
       _q(q),
       _r(r),
-      _invar(invar),
-      _scale(scale) {
+      _vpointer(vpointer)
+  {
     assert(q > 1 && is_power_of_2(q), "q must be power of 2");
     assert(0 <= r && r < q, "r must be in modulo space of q");
     assert(_mem_ref != nullptr, "must have mem_ref");
@@ -1127,6 +1121,7 @@ public:
   virtual bool is_constrained() const override final { return true; }
 
   const MemNode* mem_ref() const        { return _mem_ref; }
+  const VPointer& vpointer() const { return _vpointer; }
 
   virtual const ConstrainedAlignmentSolution* as_constrained() const override final { return this; }
 
@@ -1150,12 +1145,12 @@ public:
     // for any integers m1 and m2:
     //
     //   pre_iter = m1 * q1 + r1
-    //                     [- invar1 / (scale1 * pre_stride)  ]
-    //                     [- init / pre_stride               ]
+    //                     [- invar1 / (iv_scale1 * pre_stride)  ]
+    //                     [- init / pre_stride                  ]
     //
     //   pre_iter = m2 * q2 + r2
-    //                     [- invar2 / (scale2 * pre_stride)  ]
-    //                     [- init / pre_stride               ]
+    //                     [- invar2 / (iv_scale2 * pre_stride)  ]
+    //                     [- init / pre_stride                  ]
     //
     // Note: pre_stride and init are identical for all mem_refs in the loop.
     //
@@ -1164,13 +1159,15 @@ public:
     //
     // The invar alignment term is identical if either:
     //   - both mem_refs have no invariant.
-    //   - both mem_refs have the same invariant and the same scale.
+    //   - both mem_refs have the same invariant and the same iv_scale.
     //
-    if (s1->_invar != s2->_invar) {
-      return new EmptyAlignmentSolution("invar not identical");
-    }
-    if (s1->_invar != nullptr && s1->_scale != s2->_scale) {
-      return new EmptyAlignmentSolution("has invar with different scale");
+    // Use VPointer to do checks on invar and iv_scale:
+    const VPointer& p1 = s1->vpointer();
+    const VPointer& p2 = s2->vpointer();
+    bool both_no_invar = p1.count_invar_summands() == 0 &&
+                         p2.count_invar_summands() == 0;
+    if(!both_no_invar && !p1.has_same_invar_and_iv_scale_as(p2)) {
+      return new EmptyAlignmentSolution("invar alignment term not identical");
     }
 
     // Now, we have reduced the problem to:
@@ -1211,8 +1208,8 @@ public:
 
   virtual void print() const override final {
     tty->print("m * q(%d) + r(%d)", _q, _r);
-    if (_invar != nullptr) {
-      tty->print(" - invar[%d] / (scale(%d) * pre_stride)", _invar->_idx, _scale);
+    if (_vpointer.count_invar_summands() > 0) {
+      tty->print(" - invar / (iv_scale(%d) * pre_stride)", _vpointer.iv_scale());
     }
     tty->print_cr(" [- init / pre_stride], mem_ref[%d]", mem_ref()->_idx);
   };
@@ -1230,8 +1227,8 @@ public:
 //
 // pre-loop:
 //   iv = init + i * pre_stride
-//   adr = base + offset + invar + scale * iv
-//   adr = base + offset + invar + scale * (init + i * pre_stride)
+//   adr = base + invar + iv_scale * iv                      + con
+//   adr = base + invar + iv_scale * (init + i * pre_stride) + con
 //   iv += pre_stride
 //   i++
 //
@@ -1245,7 +1242,7 @@ public:
 //   i = pre_iter + main_iter * unroll_factor
 //   iv = init + i * pre_stride = init + pre_iter * pre_stride + main_iter * unroll_factor * pre_stride
 //                              = init + pre_iter * pre_stride + main_iter * main_stride
-//   adr = base + offset + invar + scale * iv // must be aligned
+//   adr = base + invar + iv_scale * iv + con // must be aligned
 //   iv += main_stride
 //   i  += unroll_factor
 //   main_iter++
@@ -1257,15 +1254,15 @@ public:
 // a compatible solutions.
 class AlignmentSolver {
 private:
+  const VPointer& _vpointer;
+
   const MemNode* _mem_ref;       // first element
-  const uint     _vector_length; // number of elements in vector
-  const int      _element_size;
   const int      _vector_width;  // in bytes
 
   // All vector loads and stores need to be memory aligned. The alignment width (aw) in
   // principle is the vector_width. But when vector_width > ObjectAlignmentInBytes this is
   // too strict, since any memory object is only guaranteed to be ObjectAlignmentInBytes
-  // aligned. For example, the relative offset between two arrays is only guaranteed to
+  // aligned. For example, the relative distance between two arrays is only guaranteed to
   // be divisible by ObjectAlignmentInBytes.
   const int      _aw;
 
@@ -1275,7 +1272,7 @@ private:
   //
   // The Simple form of the address is disassembled by VPointer into:
   //
-  //   adr = base + offset + invar + scale * iv
+  //   adr = base + invar + iv_scale * iv + con
   //
   // Where the iv can be written as:
   //
@@ -1284,11 +1281,6 @@ private:
   // pre_iter:    number of pre-loop iterations (adjustable via pre-loop limit)
   // main_iter:   number of main-loop iterations (main_iter >= 0)
   //
-  const Node*    _base;           // base of address (e.g. Java array object, aw-aligned)
-  const int      _offset;
-  const Node*    _invar;
-  const int      _invar_factor;   // known constant factor of invar
-  const int      _scale;
   const Node*    _init_node;      // value of iv before pre-loop
   const int      _pre_stride;     // address increment per pre-loop iteration
   const int      _main_stride;    // address increment per main-loop iteration
@@ -1301,28 +1293,18 @@ private:
   }
 
 public:
-  AlignmentSolver(const MemNode* mem_ref,
+  AlignmentSolver(const VPointer& vpointer,
+                  const MemNode* mem_ref,
                   const uint vector_length,
-                  const Node* base,
-                  const int offset,
-                  const Node* invar,
-                  const int invar_factor,
-                  const int scale,
                   const Node* init_node,
                   const int pre_stride,
                   const int main_stride
                   DEBUG_ONLY( COMMA const bool is_trace)
                   ) :
+      _vpointer(          vpointer),
       _mem_ref(           mem_ref_not_null(mem_ref)),
-      _vector_length(     vector_length),
-      _element_size(      _mem_ref->memory_size()),
-      _vector_width(      _vector_length * _element_size),
+      _vector_width(      vector_length * vpointer.size()),
       _aw(                MIN2(_vector_width, ObjectAlignmentInBytes)),
-      _base(              base),
-      _offset(            offset),
-      _invar(             invar),
-      _invar_factor(      invar_factor),
-      _scale(             scale),
       _init_node(         init_node),
       _pre_stride(        pre_stride),
       _main_stride(       main_stride)
@@ -1336,6 +1318,9 @@ public:
   AlignmentSolution* solve() const;
 
 private:
+  MemPointer::Base base() const { return _vpointer.mem_pointer().base();}
+  jint iv_scale() const { return _vpointer.iv_scale(); }
+
   class EQ4 {
    private:
     const int _C_const;

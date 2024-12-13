@@ -56,8 +56,6 @@
 // first statement is considered the left element, and the
 // second statement is considered the right element.
 
-class VPointer;
-
 // The PairSet is a set of pairs. These are later combined to packs,
 // and stored in the PackSet.
 class PairSet : public StackObj {
@@ -474,7 +472,7 @@ class SuperWord : public ResourceObj {
     return _vloop_analyzer.types().same_velt_type(n1, n2);
   }
 
-  int data_size(Node* n) const {
+  int data_size(const Node* n) const {
     return _vloop_analyzer.types().data_size(n);
   }
 
@@ -563,11 +561,35 @@ private:
   bool SLP_extract();
 
   // Find the "seed" memops pairs. These are pairs that we strongly suspect would lead to vectorization.
+  class MemOp : public StackObj {
+  private:
+    MemNode* _mem;
+    const VPointer* _vpointer;
+    int _original_index;
+
+  public:
+    // Empty, for GrowableArray
+    MemOp() :
+      _mem(nullptr),
+      _vpointer(nullptr),
+      _original_index(-1) {}
+    MemOp(MemNode* mem, const VPointer* vpointer, int original_index) :
+      _mem(mem),
+      _vpointer(vpointer),
+      _original_index(original_index) {}
+
+    MemNode* mem() const { return _mem; }
+    const VPointer& vpointer() const { return *_vpointer; }
+    int original_index() const { return _original_index; }
+
+    static int cmp_by_group(MemOp* a, MemOp* b);
+    static int cmp_by_group_and_con_and_original_index(MemOp* a, MemOp* b);
+  };
   void create_adjacent_memop_pairs();
-  void collect_valid_vpointers(GrowableArray<const VPointer*>& vpointers);
-  void create_adjacent_memop_pairs_in_all_groups(const GrowableArray<const VPointer*>& vpointers);
-  static int find_group_end(const GrowableArray<const VPointer*>& vpointers, int group_start);
-  void create_adjacent_memop_pairs_in_one_group(const GrowableArray<const VPointer*>& vpointers, const int group_start, int group_end);
+  void collect_valid_memops(GrowableArray<MemOp>& memops);
+  void create_adjacent_memop_pairs_in_all_groups(const GrowableArray<MemOp>& memops);
+  static int find_group_end(const GrowableArray<MemOp>& memops, int group_start);
+  void create_adjacent_memop_pairs_in_one_group(const GrowableArray<MemOp>& memops, const int group_start, int group_end);
 
   // Various methods to check if we can pack two nodes.
   bool can_pack_into_pair(Node* s1, Node* s2);
