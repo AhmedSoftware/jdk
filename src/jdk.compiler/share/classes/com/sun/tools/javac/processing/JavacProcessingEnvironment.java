@@ -648,7 +648,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                         add(importStringToPattern(allowModules, annotationPattern,
                                                   processor, log, lint));
                     if (lint && !patternAdded) {
-                        log.warning(Warnings.ProcDuplicateSupportedAnnotation(annotationPattern,
+                        log.warning(PROCESSING, null, Warnings.ProcDuplicateSupportedAnnotation(annotationPattern,
                                                                               p.getClass().getName()));
                     }
                 }
@@ -662,7 +662,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                 if (lint &&
                     supportedAnnotationPatterns.contains(MatchingUtils.validImportStringToPattern("*")) &&
                     supportedAnnotationPatterns.size() > 1) {
-                    log.warning(Warnings.ProcRedundantTypesWithWildcard(p.getClass().getName()));
+                    log.warning(PROCESSING, null, Warnings.ProcRedundantTypesWithWildcard(p.getClass().getName()));
                 }
 
                 supportedOptionNames = new LinkedHashSet<>();
@@ -670,8 +670,8 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                     if (checkOptionName(optionName, log)) {
                         boolean optionAdded = supportedOptionNames.add(optionName);
                         if (lint && !optionAdded) {
-                            log.warning(Warnings.ProcDuplicateOptionName(optionName,
-                                                                         p.getClass().getName()));
+                            log.warning(PROCESSING, null,
+                                        Warnings.ProcDuplicateOptionName(optionName, p.getClass().getName()));
                         }
                     }
                 }
@@ -891,7 +891,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
             // Remove annotations processed by javac
             unmatchedAnnotations.keySet().removeAll(platformAnnotations);
             if (unmatchedAnnotations.size() > 0) {
-                log.warning(Warnings.ProcAnnotationsWithoutProcessors(unmatchedAnnotations.keySet()));
+                log.warning(PROCESSING, null, Warnings.ProcAnnotationsWithoutProcessors(unmatchedAnnotations.keySet()));
             }
         }
 
@@ -1688,7 +1688,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
 
     private static Pattern warnAndNoMatches(String s, Processor p, Log log, boolean lint) {
         if (lint) {
-            log.warning(Warnings.ProcMalformedSupportedString(s, p.getClass().getName()));
+            log.warning(PROCESSING, null, Warnings.ProcMalformedSupportedString(s, p.getClass().getName()));
         }
         return noMatches; // won't match any valid identifier
     }
