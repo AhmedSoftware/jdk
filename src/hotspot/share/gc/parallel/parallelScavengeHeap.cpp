@@ -50,6 +50,7 @@
 #include "oops/oop.inline.hpp"
 #include "runtime/cpuTimeCounters.hpp"
 #include "runtime/handles.inline.hpp"
+#include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/java.hpp"
 #include "runtime/vmThread.hpp"
 #include "services/memoryManager.hpp"
@@ -286,12 +287,19 @@ HeapWord* ParallelScavengeHeap::mem_allocate_work(size_t size,
   *gc_overhead_limit_was_exceeded = false;
 
   HeapWord* result = young_gen()->allocate(size);
+  if (result != nullptr) {
+    return result;
+  }
 
   uint loop_count = 0;
-  uint gc_count = 0;
+  uint gc_count = total_collections();
   uint gclocker_stalled_count = 0;
 
-  while (result == nullptr) {
+  while (true /*return or throw error in loop*/) {
+    if (VM_CollectForAllocation::is_collect_for_allocation_started()) {
+      VM_CollectForAllocation::wait_at_collect_for_allocation_barrier();
+    }
+
     // We don't want to have multiple collections for a single filled generation.
     // To prevent this, each thread tracks the total_collections() value, and if
     // the count has changed, does not do a new collection.
@@ -305,16 +313,17 @@ HeapWord* ParallelScavengeHeap::mem_allocate_work(size_t size,
     // total_collections() value!
     {
       MutexLocker ml(Heap_lock);
-      gc_count = total_collections();
-
-      result = young_gen()->allocate(size);
-      if (result != nullptr) {
-        return result;
+      if (gc_count != total_collections()) {
+        result = young_gen()->allocate(size);
+        if (result != nullptr) {
+          return result;
+        }
+        gc_count = total_collections();
       }
 
       // If certain conditions hold, try allocating from the old gen.
-      if (!is_tlab) {
-        result = mem_allocate_old_gen(size);
+      if (!is_tlab && (!should_alloc_in_eden(size) || GCLocker::is_active_and_needs_gc())) {
+        result = allocate_old_gen_and_record(size);
         if (result != nullptr) {
           return result;
         }
@@ -348,63 +357,66 @@ HeapWord* ParallelScavengeHeap::mem_allocate_work(size_t size,
       }
     }
 
-    if (result == nullptr) {
-      // Generate a VM operation
-      VM_ParallelCollectForAllocation op(size, is_tlab, gc_count);
-      VMThread::execute(&op);
+    if (!VM_CollectForAllocation::try_set_collect_for_allocation_started()) {
+      continue;
+    }
 
-      // Did the VM operation execute? If so, return the result directly.
-      // This prevents us from looping until time out on requests that can
-      // not be satisfied.
-      if (op.prologue_succeeded()) {
-        assert(is_in_or_null(op.result()), "result not in heap");
+    // Generate a VM operation
+    VM_ParallelCollectForAllocation op(size, is_tlab, gc_count);
+    VMThread::execute(&op);
 
-        // If GC was locked out during VM operation then retry allocation
-        // and/or stall as necessary.
-        if (op.gc_locked()) {
-          assert(op.result() == nullptr, "must be null if gc_locked() is true");
-          continue;  // retry and/or stall as necessary
-        }
+    // Did the VM operation execute? If so, return the result directly.
+    // This prevents us from looping until time out on requests that can
+    // not be satisfied.
+    if (op.prologue_succeeded()) {
+      assert(is_in_or_null(op.result()), "result not in heap");
 
-        // Exit the loop if the gc time limit has been exceeded.
-        // The allocation must have failed above ("result" guarding
-        // this path is null) and the most recent collection has exceeded the
-        // gc overhead limit (although enough may have been collected to
-        // satisfy the allocation).  Exit the loop so that an out-of-memory
-        // will be thrown (return a null ignoring the contents of
-        // op.result()),
-        // but clear gc_overhead_limit_exceeded so that the next collection
-        // starts with a clean slate (i.e., forgets about previous overhead
-        // excesses).  Fill op.result() with a filler object so that the
-        // heap remains parsable.
-        const bool limit_exceeded = size_policy()->gc_overhead_limit_exceeded();
-        const bool softrefs_clear = soft_ref_policy()->all_soft_refs_clear();
-
-        if (limit_exceeded && softrefs_clear) {
-          *gc_overhead_limit_was_exceeded = true;
-          size_policy()->set_gc_overhead_limit_exceeded(false);
-          log_trace(gc)("ParallelScavengeHeap::mem_allocate: return null because gc_overhead_limit_exceeded is set");
-          if (op.result() != nullptr) {
-            CollectedHeap::fill_with_object(op.result(), size);
-          }
-          return nullptr;
-        }
-
-        return op.result();
+      // If GC was locked out during VM operation then retry allocation
+      // and/or stall as necessary.
+      if (op.gc_locked()) {
+        assert(op.result() == nullptr, "must be null if gc_locked() is true");
+        continue;  // retry and/or stall as necessary
       }
+
+      // Exit the loop if the gc time limit has been exceeded.
+      // The allocation must have failed above ("result" guarding
+      // this path is null) and the most recent collection has exceeded the
+      // gc overhead limit (although enough may have been collected to
+      // satisfy the allocation).  Exit the loop so that an out-of-memory
+      // will be thrown (return a null ignoring the contents of
+      // op.result()),
+      // but clear gc_overhead_limit_exceeded so that the next collection
+      // starts with a clean slate (i.e., forgets about previous overhead
+      // excesses).  Fill op.result() with a filler object so that the
+      // heap remains parsable.
+      const bool limit_exceeded = size_policy()->gc_overhead_limit_exceeded();
+      const bool softrefs_clear = soft_ref_policy()->all_soft_refs_clear();
+
+      if (limit_exceeded && softrefs_clear) {
+        *gc_overhead_limit_was_exceeded = true;
+        size_policy()->set_gc_overhead_limit_exceeded(false);
+        log_trace(gc)("ParallelScavengeHeap::mem_allocate: return null because gc_overhead_limit_exceeded is set");
+        if (op.result() != nullptr) {
+          CollectedHeap::fill_with_object(op.result(), size);
+        }
+        return nullptr;
+      }
+
+      return op.result();
+    } else {
+      // if the VM operation did not execute, need to make sure unset_collect_for_allocation_started is invoked.
+      VM_CollectForAllocation::unset_collect_for_allocation_started();
     }
 
     // The policy object will prevent us from looping forever. If the
     // time spent in gc crosses a threshold, we will bail out.
     loop_count++;
-    if ((result == nullptr) && (QueuedAllocationWarningCount > 0) &&
+    if ((QueuedAllocationWarningCount > 0) &&
         (loop_count % QueuedAllocationWarningCount == 0)) {
       log_warning(gc)("ParallelScavengeHeap::mem_allocate retries %d times", loop_count);
       log_warning(gc)("\tsize=" SIZE_FORMAT, size);
     }
   }
-
-  return result;
 }
 
 HeapWord* ParallelScavengeHeap::allocate_old_gen_and_record(size_t size) {
