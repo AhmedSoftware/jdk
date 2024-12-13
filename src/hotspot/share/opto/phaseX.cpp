@@ -2289,6 +2289,40 @@ void PhasePeephole::print_statistics() {
 }
 #endif
 
+Node* PhaseLowering::apply_ideal(Node* k, bool can_reshape) {
+  Node* lowered = lower_node(k);
+  if (lowered != nullptr) {
+    return lowered;
+  }
+
+  // Run the lowered Ideal method to continue doing transformations on the node, while avoiding existing ideal transforms
+  // that may undo the changes done during lowering.
+
+  return k->LoweredIdeal(this);
+}
+
+Node* PhaseLowering::lower_node(Node* n) {
+  // Apply shared lowering transforms
+
+  // Apply backend-specific lowering transforms
+  return lower_node_platform(n);
+}
+
+void PhaseLowering::lower() {
+  if (!should_lower()) {
+    return;
+  }
+
+  // Worklist should be empty before lowering
+  _worklist.ensure_empty();
+
+  C->identify_useful_nodes(_worklist);
+
+  optimize();
+
+  // Worklist should be empty after lowering
+  _worklist.ensure_empty();
+}
 
 //=============================================================================
 //------------------------------set_req_X--------------------------------------
