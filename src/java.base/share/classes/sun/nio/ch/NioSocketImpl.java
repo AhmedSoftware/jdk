@@ -53,6 +53,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import jdk.internal.access.JavaIOFileDescriptorAccess;
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.event.SocketConnectEvent;
+import jdk.internal.event.SocketConnectFailedEvent;
 import jdk.internal.ref.CleanerFactory;
 import sun.net.ConnectionResetException;
 import sun.net.NetHooks;
@@ -563,6 +565,9 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
             address = InetAddress.getLocalHost();
         int port = isa.getPort();
 
+        long connectStart = 0L;
+        IOException connectEx = null;
+
         ReentrantLock connectLock = readLock;
         try {
             connectLock.lock();
@@ -571,6 +576,7 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
                 FileDescriptor fd = beginConnect(address, port);
                 try {
                     configureNonBlockingIfNeeded(fd, millis > 0);
+                    connectStart = SocketConnectEvent.timestamp();
                     int n = Net.connect(fd, address, port);
                     if (n > 0) {
                         // connection established
@@ -600,13 +606,27 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
         } catch (IOException ioe) {
             close();
             if (ioe instanceof SocketTimeoutException) {
-                throw ioe;
+                connectEx = ioe;
             } else if (ioe instanceof InterruptedIOException) {
                 assert Thread.currentThread().isVirtual();
-                throw new SocketException("Closed by interrupt");
+                connectEx = new SocketException("Closed by interrupt");
             } else {
-                throw SocketExceptions.of(ioe, isa);
+                connectEx = SocketExceptions.of(ioe, isa);
             }
+        }
+
+        // record JFR event
+        if (connectStart != 0L) {
+            String hostname = isa.getHostString();
+            if (connectEx == null && SocketConnectEvent.enabled()) {
+                SocketConnectEvent.offer(connectStart, hostname , address, port);
+            } else if (connectEx != null && SocketConnectFailedEvent.enabled()) {
+                SocketConnectFailedEvent.offer(connectStart, hostname, address, port, connectEx);
+            }
+        }
+
+        if (connectEx != null) {
+            throw connectEx;
         }
     }
 

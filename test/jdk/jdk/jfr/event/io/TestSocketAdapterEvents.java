@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2023, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,15 +31,15 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.ByteBuffer;
+import java.net.SocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 import jdk.jfr.Recording;
 import jdk.jfr.consumer.RecordedEvent;
+import jdk.test.lib.Asserts;
 import jdk.test.lib.jfr.Events;
 import jdk.test.lib.thread.TestThread;
 import jdk.test.lib.thread.XRun;
@@ -56,6 +56,7 @@ import jdk.test.lib.thread.XRun;
 public class TestSocketAdapterEvents {
     private static final int writeInt = 'A';
     private static final byte[] writeBuf = { 'B', 'C', 'D', 'E' };
+    private static final int MAX_ATTEMPTS = 5;
 
     private List<IOEvent> expectedEvents = new ArrayList<>();
 
@@ -65,13 +66,20 @@ public class TestSocketAdapterEvents {
 
     public static void main(String[] args) throws Throwable {
         new TestSocketAdapterEvents().test();
+        boolean completed = false;
+        for (int ntries = 0; (completed == false)  && (ntries < MAX_ATTEMPTS); ++ntries) {
+            completed = testConnectException();
+        }
+        if (! completed)
+            throw new Exception("Unable to setup connect exception");
     }
 
-    public void test() throws Throwable {
+    private void test() throws Throwable {
         try (Recording recording = new Recording()) {
             try (ServerSocketChannel ssc = ServerSocketChannel.open()) {
-                recording.enable(IOEvent.EVENT_SOCKET_READ).withThreshold(Duration.ofMillis(0));
-                recording.enable(IOEvent.EVENT_SOCKET_WRITE).withThreshold(Duration.ofMillis(0));
+                recording.enable(IOEvent.EVENT_SOCKET_CONNECT);
+                recording.enable(IOEvent.EVENT_SOCKET_READ);
+                recording.enable(IOEvent.EVENT_SOCKET_WRITE);
                 recording.start();
 
                 InetAddress lb = InetAddress.getLoopbackAddress();
@@ -85,42 +93,75 @@ public class TestSocketAdapterEvents {
                              InputStream is = s.getInputStream()) {
 
                             int readInt = is.read();
-                            assertEquals(readInt, writeInt, "Wrong readInt");
+                            assertEquals(writeInt, readInt, "Wrong readInt");
                             addExpectedEvent(IOEvent.createSocketReadEvent(1, s));
 
                             int bytesRead = is.read(bs, 0, 3);
-                            assertEquals(bytesRead, 3, "Wrong bytesRead partial buffer");
+                            assertEquals(3, bytesRead, "Wrong bytesRead partial buffer");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bytesRead, s));
 
                             bytesRead = is.read(bs);
-                            assertEquals(bytesRead, writeBuf.length, "Wrong bytesRead full buffer");
+                            assertEquals(writeBuf.length, bytesRead, "Wrong bytesRead full buffer");
                             addExpectedEvent(IOEvent.createSocketReadEvent(bytesRead, s));
 
                             // Try to read more, but writer have closed. Should
                             // get EOF.
                             readInt = is.read();
-                            assertEquals(readInt, -1, "Wrong readInt at EOF");
+                            assertEquals(-1, readInt, "Wrong readInt at EOF");
                             addExpectedEvent(IOEvent.createSocketReadEvent(-1, s));
                         }
                     }
                 });
                 readerThread.start();
 
-                try (SocketChannel sc = SocketChannel.open(ssc.getLocalAddress());
-                     Socket s = sc.socket(); OutputStream os = s.getOutputStream()) {
-
-                    os.write(writeInt);
-                    addExpectedEvent(IOEvent.createSocketWriteEvent(1, s));
-                    os.write(writeBuf, 0, 3);
-                    addExpectedEvent(IOEvent.createSocketWriteEvent(3, s));
-                    os.write(writeBuf);
-                    addExpectedEvent(IOEvent.createSocketWriteEvent(writeBuf.length, s));
+                try (SocketChannel sc = SocketChannel.open(); Socket s = sc.socket()) {
+                    s.connect(ssc.getLocalAddress());
+                    addExpectedEvent(IOEvent.createSocketConnectEvent(s));
+                    try (OutputStream os = s.getOutputStream()) {
+                        os.write(writeInt);
+                        addExpectedEvent(IOEvent.createSocketWriteEvent(1, s));
+                        os.write(writeBuf, 0, 3);
+                        addExpectedEvent(IOEvent.createSocketWriteEvent(3, s));
+                        os.write(writeBuf);
+                        addExpectedEvent(IOEvent.createSocketWriteEvent(writeBuf.length, s));
+                    }
                 }
 
                 readerThread.joinAndThrow();
                 recording.stop();
                 List<RecordedEvent> events = Events.fromRecording(recording);
                 IOHelper.verifyEquals(events, expectedEvents);
+            }
+        }
+    }
+
+    private static boolean testConnectException() throws Throwable {
+        try (Recording recording = new Recording()) {
+            try (ServerSocketChannel ssc = ServerSocketChannel.open()) {
+                recording.enable(IOEvent.EVENT_SOCKET_CONNECT_FAILED);
+                recording.start();
+
+                InetAddress lb = InetAddress.getLoopbackAddress();
+                ssc.bind(new InetSocketAddress(lb, 0));
+                SocketAddress addr = ssc.getLocalAddress();
+                ssc.close();
+
+                IOException connectException = null;
+                try (SocketChannel sc = SocketChannel.open()) {
+                    Socket s = sc.socket();
+                    s.connect(addr);
+                    // unexpected, abandon the test
+                    return false;
+                } catch (IOException ioe) {
+                    // we expect this
+                    connectException = ioe;
+                }
+
+                recording.stop();
+                List<RecordedEvent> events = Events.fromRecording(recording);
+                Asserts.assertEquals(1, events.size());
+                IOHelper.checkConnectEventException(events.get(0), connectException);
+                return true;
             }
         }
     }
