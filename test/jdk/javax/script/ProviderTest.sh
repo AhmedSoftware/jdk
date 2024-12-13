@@ -50,6 +50,6 @@ then
 fi
 
 echo "Running test ..."
-$JAVA ${TESTVMOPTS} -classpath \
+$JAVA ${TESTVMOPTS} ${TESTJAVAOPTS} -classpath \
   "${TESTCLASSES}${PS}${TESTCLASSES}/dummy.jar" \
   ProviderTest
