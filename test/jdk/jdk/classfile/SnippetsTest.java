@@ -42,7 +42,9 @@ public class SnippetsTest {
     @ParameterizedTest
     @ValueSource(strings = {
         "src/java.base/share/classes/java/lang/classfile/snippet-files/PackageSnippets.java",
-        "src/java.base/share/classes/jdk/internal/classfile/components/snippet-files/PackageSnippets.java"})
+        "src/java.base/share/classes/java/lang/classfile/constantpool/snippet-files/PackageSnippets.java",
+        "src/java.base/share/classes/jdk/internal/classfile/components/snippet-files/PackageSnippets.java"
+    })
     void testSnippet(String source) throws Exception {
         var p = Paths.get(System.getProperty("test.src", ".")).toAbsolutePath();
         while ((p = p.getParent()) != null) {
