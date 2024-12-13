@@ -107,9 +107,9 @@ VStatus VLoop::check_preconditions_helper() {
     return VStatus::make_failure(VLoop::FAILURE_BACKEDGE);
   }
 
-  // To align vector memory accesses in the main-loop, we will have to adjust
-  // the pre-loop limit.
   if (_cl->is_main_loop()) {
+    // To align vector memory accesses in the main-loop, we will have to adjust
+    // the pre-loop limit.
     CountedLoopEndNode* pre_end = _cl->find_pre_loop_end();
     if (pre_end == nullptr) {
       return VStatus::make_failure(VLoop::FAILURE_PRE_LOOP_LIMIT);
@@ -119,6 +119,41 @@ VStatus VLoop::check_preconditions_helper() {
       return VStatus::make_failure(VLoop::FAILURE_PRE_LOOP_LIMIT);
     }
     _pre_loop_end = pre_end;
+
+    // See if we find the infrastructure for speculative runtime-checks.
+    //  (1) Auto Vectorization Parse Predicate
+    Node* pre_ctrl = pre_loop_head()->in(LoopNode::EntryControl);
+    const Predicates predicates(pre_ctrl);
+    const PredicateBlock* predicate_block = predicates.auto_vectorization_check_block();
+    if (predicate_block->has_parse_predicate()) {
+      _auto_vectorization_parse_predicate_proj = predicate_block->parse_predicate_success_proj();
+    }
+
+    //  (2) Multiversioning fast-loop projection
+    IfTrueNode* before_predicates = predicates.entry()->isa_IfTrue();
+    if (before_predicates != nullptr &&
+        before_predicates->in(0)->is_If() &&
+        before_predicates->in(0)->in(1)->is_OpaqueMultiversioning()) {
+      _multiversioning_fast_proj = before_predicates;
+    }
+#ifndef PRODUCT
+    if (is_trace_preconditions()) {
+      tty->print_cr(" Infrastructure for speculative runtime-checks:");
+      if (_auto_vectorization_parse_predicate_proj != nullptr) {
+        tty->print_cr("  auto_vectorization_parse_predicate_proj: speculate and trap");
+        _auto_vectorization_parse_predicate_proj->dump_bfs(5,0,"");
+      } else if (_multiversioning_fast_proj != nullptr) {
+        tty->print_cr("  multiversioning_fast_proj: speculate and multiversion");
+        _multiversioning_fast_proj->dump_bfs(5,0,"");
+      } else {
+        tty->print_cr("  Not found.");
+      }
+    }
+#endif
+    assert(_auto_vectorization_parse_predicate_proj == nullptr ||
+           _multiversioning_fast_proj == nullptr, "we should only have at most one of these");
+    assert(_cl->is_multiversion_fast_loop() == (_multiversioning_fast_proj != nullptr),
+           "must find the multiversion selector IFF loop is a multiversion fast loop");
   }
 
   return VStatus::make_success();
@@ -1704,9 +1739,18 @@ AlignmentSolution* AlignmentSolver::solve() const {
   //                          \   + scale * main_stride * main_iter         + C_main  * main_iter       (main-loop term)
   //
   // We describe the 6 terms:
-  //   1) The "base" of the address is the address of a Java object (e.g. array),
-  //      and as such ObjectAlignmentInBytes (a power of 2) aligned. We have
-  //      defined aw = MIN(vector_width, ObjectAlignmentInBytes), which is also
+  //   1) The "base" of the address:
+  //        - For heap objects, this is the base of the object, and as such
+  //          ObjectAlignmentInBytes (a power of 2) aligned.
+  //        - For off-heap / native memory, the "base" is null, but instead
+  //          there is some "adr" of unknown alignment. If we can, we add
+  //          a runtime check to verify ObjectAlignmentInBytes alignment.
+  //          If we do not pass this check, then we currently have to return
+  //          an empty solution.
+  //          In a future RFE, we could add the "adr" to the "invar", and
+  //          have some alignment runtime-check on the "invar" instead, which
+  //          would allow more cases to vectorize.
+  //      We defined aw = MIN(vector_width, ObjectAlignmentInBytes), which is
   //      a power of 2. And hence we know that "base" is thus also aw-aligned:
   //
   //        base % ObjectAlignmentInBytes = 0     ==>    base % aw = 0
@@ -1733,6 +1777,13 @@ AlignmentSolution* AlignmentSolver::solve() const {
   //      memory reference.
   //   6) The "C_main * main_iter" term represents how much the iv is increased
   //      during "main_iter" main-loop iterations.
+
+  // For native memory, we must add a runtime-check that "adr % ObjectAlignmentInBytes". If we
+  // cannot add this runtime-check, we have no guarantee on its alignment.
+  // In a future RFE we can generalize this, and add runtime-checks for the invariant as well.
+  if (_base->is_top() && !_are_speculative_checks_possible) {
+    return new EmptyAlignmentSolution("Cannot add speculative check for native memory alignment.");
+  }
 
   // Attribute init (i.e. _init_node) either to C_const or to C_init term.
   const int C_const_init = _init_node->is_ConI() ? _init_node->as_ConI()->get_int() : 0;

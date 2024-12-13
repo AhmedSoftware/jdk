@@ -4483,6 +4483,33 @@ PhaseIdealLoop::auto_vectorize(IdealLoopTree* lpt, VSharedData &vshared) {
   return AutoVectorizeStatus::Success;
 }
 
+// TODO desc
+void PhaseIdealLoop::maybe_multiversion_for_auto_vectorization_runtime_checks(IdealLoopTree* lpt, Node_List& old_new) {
+  CountedLoopNode* cl = lpt->_head->as_CountedLoop();
+  LoopNode* outer_loop = cl->skip_strip_mined();
+  Node* entry = outer_loop->in(LoopNode::EntryControl);
+
+  // Check we have multiversioning enabled, and are not already multiversioned.
+  if (!LoopMultiversioning || cl->is_multiversion()) { return; }
+
+  // Check that we do not have a parse-predicate where we can add the runtime checks
+  // during auto-vectorization.
+  const Predicates predicates(entry);
+  const PredicateBlock* predicate_block = predicates.auto_vectorization_check_block();
+  if (predicate_block->has_parse_predicate()) { return; }
+
+  // We only use the multiversioning in auto-vectorization for now. And we currently
+  // do not allow any CFG in auto-vectorization. Hence, only multiversion when we have
+  // no CFG in the loop.
+  if (cl->loopexit()->in(0) != cl) { return; }
+
+  // Check node budget.
+  uint estimate = lpt->est_loop_clone_sz(2);
+  if (!may_require_nodes(estimate)) { return; }
+
+  do_multiversioning(lpt, old_new);
+}
+
 // Returns true if the Reduction node is unordered.
 static bool is_unordered_reduction(Node* n) {
   return n->is_Reduction() && !n->as_Reduction()->requires_strict_order();

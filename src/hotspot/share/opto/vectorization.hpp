@@ -84,6 +84,14 @@ private:
   PhiNode* _iv;
   CountedLoopEndNode* _pre_loop_end; // cache access to pre-loop for main loops only
 
+  // We can add speculative runtime-checks if we have one of these:
+  //  - Auto Vectorization Parse Predicate:
+  //      pass all checks or trap -> recompile without this predicate.
+  //  - Multiversioning fast-loop projection:
+  //      pass all checks or go to slow-path-loop, where we have no speculative assumptions.
+  ParsePredicateSuccessProj* _auto_vectorization_parse_predicate_proj;
+  IfTrueNode* _multiversioning_fast_proj;
+
   NOT_PRODUCT(VTrace _vtrace;)
 
   static constexpr char const* FAILURE_ALREADY_VECTORIZED = "loop already vectorized";
@@ -102,7 +110,9 @@ public:
     _cl        (nullptr),
     _cl_exit   (nullptr),
     _iv        (nullptr),
-    _pre_loop_end (nullptr) {}
+    _pre_loop_end (nullptr),
+    _auto_vectorization_parse_predicate_proj(nullptr),
+    _multiversioning_fast_proj(nullptr) {}
   NONCOPYABLE(VLoop);
 
   IdealLoopTree* lpt()        const { return _lpt; };
@@ -124,6 +134,19 @@ public:
     assert(head != nullptr, "must find head");
     return head;
   };
+
+  ParsePredicateSuccessProj* auto_vectorization_parse_predicate_proj() const {
+    return _auto_vectorization_parse_predicate_proj;
+  }
+
+  IfTrueNode* multiversioning_fast_proj() const {
+    return _multiversioning_fast_proj;
+  }
+
+  bool are_speculative_checks_possible() const {
+    return _auto_vectorization_parse_predicate_proj != nullptr ||
+           _multiversioning_fast_proj != nullptr;
+  }
 
   // Estimate maximum size for data structures, to avoid repeated reallocation
   int estimated_body_length() const { return lpt()->_body.size(); };
@@ -1293,6 +1316,9 @@ private:
   const int      _pre_stride;     // address increment per pre-loop iteration
   const int      _main_stride;    // address increment per main-loop iteration
 
+  // TODO desc
+  const bool     _are_speculative_checks_possible;
+
   DEBUG_ONLY( const bool _is_trace; );
 
   static const MemNode* mem_ref_not_null(const MemNode* mem_ref) {
@@ -1310,7 +1336,8 @@ public:
                   const int scale,
                   const Node* init_node,
                   const int pre_stride,
-                  const int main_stride
+                  const int main_stride,
+                  const bool are_speculative_checks_possible
                   DEBUG_ONLY( COMMA const bool is_trace)
                   ) :
       _mem_ref(           mem_ref_not_null(mem_ref)),
@@ -1325,7 +1352,8 @@ public:
       _scale(             scale),
       _init_node(         init_node),
       _pre_stride(        pre_stride),
-      _main_stride(       main_stride)
+      _main_stride(       main_stride),
+      _are_speculative_checks_possible(are_speculative_checks_possible)
       DEBUG_ONLY( COMMA _is_trace(is_trace) )
   {
     assert(_mem_ref != nullptr &&

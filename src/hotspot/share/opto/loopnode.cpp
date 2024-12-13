@@ -1091,6 +1091,14 @@ bool PhaseIdealLoop::create_loop_nest(IdealLoopTree* loop, Node_List &old_new) {
     if (UseProfiledLoopPredicate) {
       add_parse_predicate(Deoptimization::Reason_profile_predicate, inner_head, outer_ilt, cloned_sfpt);
     }
+
+    // We only want to use the auto-vectorization check as a trap once per bci. And
+    // PhaseIdealLoop::add_parse_predicate only checks trap limits per method, so
+    // we do a custom check here.
+    if (!C->too_many_traps(cloned_sfpt->jvms()->method(), cloned_sfpt->jvms()->bci(), Deoptimization::Reason_auto_vectorization_check)) {
+      add_parse_predicate(Deoptimization::Reason_auto_vectorization_check, inner_head, outer_ilt, cloned_sfpt);
+    }
+
     add_parse_predicate(Deoptimization::Reason_loop_limit_check, inner_head, outer_ilt, cloned_sfpt);
   }
 
@@ -2512,6 +2520,9 @@ void CountedLoopNode::dump_spec(outputStream *st) const {
   if (is_main_loop()) st->print("main of N%d", _idx);
   if (is_post_loop()) st->print("post of N%d", _main_idx);
   if (is_strip_mined()) st->print(" strip mined");
+  if (is_multiversion_fast_loop())         { st->print(" multiversion_fast"); }
+  if (is_multiversion_slow_loop())         { st->print(" multiversion_slow"); }
+  if (is_multiversion_stalled_slow_loop()) { st->print(" multiversion_stalled_slow"); }
 }
 #endif
 
@@ -4302,6 +4313,9 @@ void IdealLoopTree::dump_head() {
     if (cl->is_post_loop()) tty->print(" post");
     if (cl->is_vectorized_loop()) tty->print(" vector");
     if (range_checks_present()) tty->print(" rc ");
+    if (cl->is_multiversion_fast_loop())         { tty->print(" multiversion_fast"); }
+    if (cl->is_multiversion_slow_loop())         { tty->print(" multiversion_slow"); }
+    if (cl->is_multiversion_stalled_slow_loop()) { tty->print(" multiversion_stalled_slow"); }
   }
   if (_has_call) tty->print(" has_call");
   if (_has_sfpt) tty->print(" has_sfpt");
@@ -4947,16 +4961,27 @@ void PhaseIdealLoop::build_and_optimize() {
     C->set_major_progress();
   }
 
-  // Keep loop predicates and perform optimizations with them
-  // until no more loop optimizations could be done.
-  // After that switch predicates off and do more loop optimizations.
-  if (!C->major_progress() && (C->parse_predicate_count() > 0)) {
-    C->mark_parse_predicate_nodes_useless(_igvn);
-    assert(C->parse_predicate_count() == 0, "should be zero now");
-     if (TraceLoopOpts) {
-       tty->print_cr("PredicatesOff");
-     }
-     C->set_major_progress();
+  // Auto-vectorization requires a fully canonicalized graph, e.g. all
+  // constant-folding must be completed.
+  // TODO do we need this? Used to be accomplised by removing predicates earier...
+  // TODO maybe we can drop the adding of those nodes to workist.
+  // TODO also with improved parsing of VPointer, this step might be unnecessary,
+  //      as we can do constant folding in parsing!
+  if (C->do_superword() && C->has_loops() && !C->major_progress()) {
+    bool found_work = false;
+    for (uint i = 0; i < _igvn._worklist.size(); i++) {
+      Node* n = _igvn._worklist.at(i);
+      if (!n->is_Opaque1() && n->Opcode() != Op_ConvI2L && n->Opcode() != Op_CastII) {
+        found_work = true;
+        break;
+      }
+    }
+    if (found_work) {
+      if (TraceLoopOpts) {
+        tty->print_cr("DoIGVNBeforeSuperWord");
+      }
+      C->set_major_progress();
+    }
   }
 
   // Auto-vectorize main-loop
@@ -4990,6 +5015,18 @@ void PhaseIdealLoop::build_and_optimize() {
         move_unordered_reduction_out_of_loop(lpt);
       }
     }
+  }
+
+  // Keep loop predicates and perform optimizations with them
+  // until no more loop optimizations could be done.
+  // After that switch predicates off and do more loop optimizations.
+  if (!C->major_progress() && (C->parse_predicate_count() > 0)) {
+    C->mark_parse_predicate_nodes_useless(_igvn);
+    assert(C->parse_predicate_count() == 0, "should be zero now");
+    if (TraceLoopOpts) {
+      tty->print_cr("PredicatesOff");
+    }
+    C->set_major_progress();
   }
 }
 
