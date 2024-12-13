@@ -306,9 +306,8 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseAESCTRIntrinsics, false);
   }
 
-  if (UseGHASHIntrinsics) {
-    warning("GHASH intrinsics are not available on this CPU");
-    FLAG_SET_DEFAULT(UseGHASHIntrinsics, false);
+  if (FLAG_IS_DEFAULT(UseGHASHIntrinsics)) {
+    FLAG_SET_DEFAULT(UseGHASHIntrinsics, true);
   }
 
   if (FLAG_IS_DEFAULT(UseFMA)) {
