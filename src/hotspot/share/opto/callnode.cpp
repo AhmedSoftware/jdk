@@ -1666,6 +1666,8 @@ Node *AllocateArrayNode::make_ideal_length(const TypeOopPtr* oop_type, PhaseValu
 }
 
 //=============================================================================
+const TypeFunc* LockNode::_lock_type_tf = nullptr;
+
 uint LockNode::size_of() const { return sizeof(*this); }
 
 // Redundant lock elimination
