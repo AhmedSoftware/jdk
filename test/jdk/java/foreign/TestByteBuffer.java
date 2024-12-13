@@ -451,7 +451,7 @@ public class TestByteBuffer {
             DirectBuffer directBuffer = ((DirectBuffer)bb);
             assertEquals(directBuffer.address(), segment.address());
             assertTrue((directBuffer.attachment() == null) == (bb instanceof ByteBuffer));
-            assertTrue(directBuffer.cleaner() == null);
+            assertTrue(directBuffer.cleanable() == null);
         }
     }
 
